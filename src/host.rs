@@ -13,6 +13,7 @@
 //! | `publish(i32, i64)`   | `topic/publish`    | publish a sample to a topic      |
 //! | `poll(i32) -> i64`    | `topic/subscribe`  | latest sample on a topic         |
 //! | `count(i32) -> i64`   | `topic/subscribe`  | #samples published to a topic    |
+//! | `take(i32) -> i64`    | `topic/subscribe`  | pop oldest unread sample (FIFO)  |
 //!
 //! `poll` of an empty topic returns [`EMPTY`]. The topic bus is threaded *by
 //! value* through each run so the broker can pass one bus across a whole booted
@@ -140,6 +141,21 @@ pub fn run_with_host(
                 let n = c.data().bus.count(topic) as i64;
                 c.data_mut().calls += 1;
                 Ok(n)
+            },
+        )
+        .map_err(run_err)?;
+    linker
+        .func_wrap(
+            "aiueos:host",
+            "take",
+            |mut c: Caller<'_, HostCtx>, topic: i32| -> anyhow::Result<i64> {
+                // pop the oldest unread sample (FIFO) so a consumer never misses
+                // one; EMPTY when drained. Same capability as poll.
+                gate(c.data(), "topic/subscribe", "take")?;
+                let d = c.data_mut();
+                let v = d.bus.take(topic).unwrap_or(EMPTY);
+                d.calls += 1;
+                Ok(v)
             },
         )
         .map_err(run_err)?;

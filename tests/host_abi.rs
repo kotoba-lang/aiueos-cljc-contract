@@ -45,6 +45,15 @@ const PUBLISH_TWICE_COUNT: &str = r#"(module
     (call $pub (i32.const 1) (i64.const 20))
     (call $cnt (i32.const 1))))"#;
 
+// publishes 10 then 20 to topic 1, returns take(1) → 10 (FIFO oldest, vs poll=20).
+const PUBLISH_TWICE_TAKE: &str = r#"(module
+  (import "aiueos:host" "publish" (func $pub (param i32 i64)))
+  (import "aiueos:host" "take"    (func $take (param i32) (result i64)))
+  (func (export "run") (result i64)
+    (call $pub (i32.const 1) (i64.const 10))
+    (call $pub (i32.const 1) (i64.const 20))
+    (call $take (i32.const 1))))"#;
+
 fn caps(items: &[&str]) -> BTreeSet<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
@@ -109,6 +118,22 @@ fn count_reports_publish_count_and_needs_subscribe() {
         run(PUBLISH_TWICE_COUNT, &[], &caps(&["topic/publish"])).is_err(),
         "count without topic/subscribe must trap"
     );
+}
+
+#[test]
+fn take_pops_oldest_fifo_unlike_poll() {
+    // take returns the OLDEST unread sample (10), where poll would return the
+    // latest (20) — proves FIFO drain semantics.
+    let o = run(
+        PUBLISH_TWICE_TAKE,
+        &[],
+        &caps(&["topic/publish", "topic/subscribe"]),
+    )
+    .expect("granted");
+    assert_eq!(o.result, 10);
+
+    // take without topic/subscribe traps.
+    assert!(run(PUBLISH_TWICE_TAKE, &[], &caps(&["topic/publish"])).is_err());
 }
 
 #[test]

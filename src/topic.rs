@@ -8,7 +8,7 @@
 //! + a per-topic publish count, numeric topic ids, i64 payloads. Queued history,
 //! typed messages and named topics are later phases.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 /// A numeric topic identifier. Phase-0 uses integers; named topics with their own
 /// per-topic capabilities (`topic/scan`, `topic/cmd`) are a later refinement that
@@ -19,6 +19,9 @@ pub type TopicId = i32;
 pub struct TopicBus {
     latest: BTreeMap<TopicId, i64>,
     counts: BTreeMap<TopicId, u64>,
+    /// Unread samples per topic, oldest-first — drained by `take` so a consumer
+    /// never misses a reading (where `latest` would coalesce to the newest).
+    queues: BTreeMap<TopicId, VecDeque<i64>>,
 }
 
 impl TopicBus {
@@ -26,15 +29,27 @@ impl TopicBus {
         Self::default()
     }
 
-    /// Publish `value` to `topic` (last write wins) and bump its publish count.
+    /// Publish `value` to `topic`: update the latest value, bump the publish
+    /// count, and enqueue it for FIFO `take`.
     pub fn publish(&mut self, topic: TopicId, value: i64) {
         self.latest.insert(topic, value);
         *self.counts.entry(topic).or_insert(0) += 1;
+        self.queues.entry(topic).or_default().push_back(value);
     }
 
-    /// The most recent value on `topic`, or `None` if nothing was ever published.
+    /// The most recent value on `topic` (peek, non-destructive), or `None`.
     pub fn latest(&self, topic: TopicId) -> Option<i64> {
         self.latest.get(&topic).copied()
+    }
+
+    /// Pop the oldest unread sample on `topic` (FIFO), or `None` if drained.
+    pub fn take(&mut self, topic: TopicId) -> Option<i64> {
+        self.queues.get_mut(&topic).and_then(|q| q.pop_front())
+    }
+
+    /// Unread (not-yet-taken) samples on `topic`.
+    pub fn pending(&self, topic: TopicId) -> usize {
+        self.queues.get(&topic).map_or(0, |q| q.len())
     }
 
     /// How many times `topic` has been published to.
@@ -62,6 +77,26 @@ mod tests {
         bus.publish(1, 20);
         assert_eq!(bus.latest(1), Some(20), "last write wins");
         assert_eq!(bus.count(1), 2);
+    }
+
+    #[test]
+    fn take_drains_fifo_oldest_first() {
+        let mut bus = TopicBus::new();
+        bus.publish(1, 10);
+        bus.publish(1, 20);
+        bus.publish(1, 30);
+        assert_eq!(bus.pending(1), 3);
+        assert_eq!(bus.take(1), Some(10), "oldest first");
+        assert_eq!(bus.take(1), Some(20));
+        assert_eq!(bus.pending(1), 1);
+        assert_eq!(bus.latest(1), Some(30), "latest is unaffected by take");
+        assert_eq!(bus.take(1), Some(30));
+        assert_eq!(bus.take(1), None, "drained");
+        assert_eq!(
+            bus.count(1),
+            3,
+            "count is total published, not affected by take"
+        );
     }
 
     #[test]
