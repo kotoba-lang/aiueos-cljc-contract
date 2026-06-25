@@ -271,6 +271,20 @@ impl Manifest {
         })
     }
 
+    /// Parse a single component manifest from EDN.
+    ///
+    /// ```
+    /// use aiueos::{Kind, Manifest, Trust};
+    /// let d = Manifest::parse_str(
+    ///     "{:aiueos/component :driver/blk :aiueos/kind :driver
+    ///       :aiueos/exports #{:block/read} :aiueos/entry \"read\" :aiueos/args [7]}",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(d.id, "driver/blk");
+    /// assert_eq!(d.kind, Kind::Driver);
+    /// assert_eq!(d.trust, Trust::Untrusted); // default for a non-agent
+    /// assert_eq!(d.args, vec![7]);
+    /// ```
     pub fn parse_str(src: &str) -> Result<Manifest> {
         let v = kotoba_edn::parse(src)?;
         Manifest::from_edn(&v)

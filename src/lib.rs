@@ -25,6 +25,33 @@
 //! - [`host`] — broker-mediated `aiueos:host` ABI: capabilities enforced at call
 //!   time (feature `wasm-runtime`).
 //! - [`runtime`] — kototama compile (`kototama`) + wasm execution (`wasm-runtime`).
+//!
+//! ## Example: describe a component, then let the broker decide
+//!
+//! ```
+//! use aiueos::graph::CapabilityGraph;
+//! use aiueos::policy;
+//! use aiueos::{Manifest, Policy};
+//!
+//! // A component written as kotoba (EDN): a notes app that wants to log.
+//! let app = Manifest::parse_str(
+//!     "{:aiueos/component :app/notes :aiueos/kind :app :aiueos/imports #{:log/write}}",
+//! )
+//! .unwrap();
+//!
+//! // The capability graph + the default policy decide what it may touch.
+//! let graph = CapabilityGraph::build(std::slice::from_ref(&app));
+//! let grant = policy::verify_component(&app, &graph, &Policy::default()).unwrap();
+//! assert!(grant.capabilities.contains("log/write")); // log/write is a kernel cap
+//!
+//! // An import nobody provides is denied before anything runs.
+//! let lonely = Manifest::parse_str(
+//!     "{:aiueos/component :app/lonely :aiueos/kind :app :aiueos/imports #{:gpu/render}}",
+//! )
+//! .unwrap();
+//! let g2 = CapabilityGraph::build(std::slice::from_ref(&lonely));
+//! assert!(policy::verify_component(&lonely, &g2, &Policy::default()).is_err());
+//! ```
 
 pub mod audit;
 pub mod broker;

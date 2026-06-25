@@ -97,6 +97,13 @@ fn walk(v: &EdnValue, reasons: &mut Vec<String>) {
 
 /// Returns `Ok(())` if `src` is within the safe-kotoba subset, else the list of
 /// reasons it was rejected.
+///
+/// ```
+/// // Pure computation is fine:
+/// assert!(aiueos::safe::check("(defn f [n] (+ n 1))").is_ok());
+/// // Escape hatches are rejected (ambient filesystem access here):
+/// assert!(aiueos::safe::check("(defn f [] (slurp \"/etc/passwd\"))").is_err());
+/// ```
 pub fn check(src: &str) -> Result<()> {
     let forms = kotoba_edn::parse_all(src)?;
     let mut reasons = Vec::new();
