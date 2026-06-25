@@ -116,6 +116,44 @@ fn audit_replays_a_populated_log() {
     let _ = std::fs::remove_file(&log);
 }
 
+#[test]
+fn audit_filters_by_event_and_emits_edn() {
+    // Build a populated log via verify, then query it.
+    let manifest = write(
+        "filterme.edn",
+        "{:aiueos/component :app/filterme :aiueos/kind :app :aiueos/imports #{:log/write}}",
+    );
+    let log = scratch(".aiueos/audit.edn");
+    let _ = std::fs::remove_file(&log);
+    let (_c, _o, _e) = aiueos(&["verify", manifest.to_str().unwrap()]);
+
+    // --event grant → only grant entries; --edn → an EDN vector.
+    let (code, out, _e) = aiueos(&[
+        "audit",
+        "--log",
+        log.to_str().unwrap(),
+        "--event",
+        "grant",
+        "--edn",
+    ]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("filtered log is valid EDN");
+    let items = v.as_vector().expect("a vector");
+    assert!(!items.is_empty(), "at least one grant");
+    assert!(
+        items
+            .iter()
+            .all(|e| aiueos::edn::get_kw(e, "aiueos", "event").as_deref() == Some("grant")),
+        "every entry matches the event filter"
+    );
+
+    // --event deny → no matches for this clean component.
+    let (code, out, _e) = aiueos(&["audit", "--log", log.to_str().unwrap(), "--event", "deny"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("no audit entries"));
+    let _ = std::fs::remove_file(&log);
+}
+
 // ---------------------------------------------------------------------------
 // verify — capability + policy check on a single manifest (no wasm needed)
 // ---------------------------------------------------------------------------

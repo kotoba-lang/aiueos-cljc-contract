@@ -6,7 +6,7 @@
 //!   aiueos compile <source.clj|manifest> [-o out.wasm]      CLJ/Kotoba → wasm
 //!   aiueos check   <source.clj>                             safe-kotoba subset gate
 //!   aiueos hash    <file> [--edn]                           sha256 for :aiueos/wasm-sha256
-//!   aiueos audit   [--log <audit.edn>]                      replay the audit log
+//!   aiueos audit   [--log <audit.edn>] [--event K] [--component C] [--edn]   replay/query the audit log
 
 use aiueos::audit::AuditLog;
 use aiueos::broker::Broker;
@@ -88,12 +88,21 @@ fn print_usage() {
          aiueos compile <source.clj|manifest> [-o out.wasm]\n  \
          aiueos check   <source.clj>\n  \
          aiueos hash    <file> [--edn]\n  \
-         aiueos audit   [--log <audit.edn>]"
+         aiueos audit   [--log <audit.edn>] [--event K] [--component C] [--edn]"
     );
 }
 
 /// Flags that consume the following argument as their value.
-const VALUE_FLAGS: &[&str] = &["--policy", "--system", "--log", "-o", "--out", "--rounds"];
+const VALUE_FLAGS: &[&str] = &[
+    "--policy",
+    "--system",
+    "--log",
+    "-o",
+    "--out",
+    "--rounds",
+    "--event",
+    "--component",
+];
 
 /// Tiny flag reader: pull `--name <value>` (or `-o <value>`) out of args.
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -593,7 +602,31 @@ fn cmd_audit(args: &[String]) -> aiueos::Result<()> {
         Some(p) => AuditLog::new(p),
         None => AuditLog::new(PathBuf::from(".aiueos/audit.edn")),
     };
-    let entries = log.read()?;
+    let want_event = flag(args, "--event");
+    let want_component = flag(args, "--component");
+    let edn_mode = args.iter().any(|a| a == "--edn");
+
+    let entries: Vec<kotoba_edn::EdnValue> = log
+        .read()?
+        .into_iter()
+        .filter(|e| {
+            want_event.as_ref().map_or(true, |w| {
+                aiueos::edn::get_kw(e, "aiueos", "event").as_deref() == Some(w)
+            }) && want_component.as_ref().map_or(true, |w| {
+                aiueos::edn::get_str(e, "aiueos", "component").as_deref() == Some(w)
+            })
+        })
+        .collect();
+
+    if edn_mode {
+        // Machine-readable: the (filtered) entries as an EDN vector.
+        println!(
+            "{}",
+            kotoba_edn::to_string(&kotoba_edn::EdnValue::vector(entries))
+        );
+        return Ok(());
+    }
+
     if entries.is_empty() {
         println!("(no audit entries at {})", log.path().display());
         return Ok(());
