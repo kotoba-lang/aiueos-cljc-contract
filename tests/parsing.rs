@@ -153,6 +153,31 @@ fn manifest_rejects_absurd_and_non_integer_memory() {
 }
 
 #[test]
+fn manifest_rejects_malformed_args() {
+    // Non-integer element, or a non-vector value, must not be silently coerced.
+    assert!(matches!(
+        Manifest::parse_str(
+            r#"{:aiueos/component :a/x :aiueos/kind :app :aiueos/args [1 "two" 3]}"#
+        ),
+        Err(AiueosError::Schema(_))
+    ));
+    assert!(matches!(
+        Manifest::parse_str("{:aiueos/component :a/x :aiueos/kind :app :aiueos/args 5}"),
+        Err(AiueosError::Schema(_))
+    ));
+}
+
+#[test]
+fn manifest_accepts_integer_args_and_empty() {
+    let m = Manifest::parse_str("{:aiueos/component :a/x :aiueos/kind :app :aiueos/args [1 2 -3]}")
+        .unwrap();
+    assert_eq!(m.args, vec![1, 2, -3]);
+    let e =
+        Manifest::parse_str("{:aiueos/component :a/y :aiueos/kind :app :aiueos/args []}").unwrap();
+    assert!(e.args.is_empty());
+}
+
+#[test]
 fn manifest_accepts_limits_at_the_boundaries() {
     let m = Manifest::parse_str(
         "{:aiueos/component :a/x :aiueos/kind :app :aiueos/limits {:memory-pages 1 :fuel 1}}",

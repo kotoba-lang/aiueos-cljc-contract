@@ -232,11 +232,27 @@ impl Manifest {
             None => Limits::default(),
         };
 
+        // `:aiueos/args` must be a vector of integers (the i64 args passed to the
+        // entry). Silently dropping a non-integer element or ignoring a non-vector
+        // value would pass the entry the wrong arguments — fail loud instead.
         let args = match edn::get(v, "aiueos", "args") {
+            None => Vec::new(),
             Some(EdnValue::Vector(xs)) | Some(EdnValue::List(xs)) => {
-                xs.iter().filter_map(|x| x.as_integer()).collect()
+                let mut out = Vec::with_capacity(xs.len());
+                for x in xs {
+                    out.push(x.as_integer().ok_or_else(|| {
+                        AiueosError::Schema(format!(
+                            "{id}: :aiueos/args must be a vector of integers"
+                        ))
+                    })?);
+                }
+                out
             }
-            _ => Vec::new(),
+            Some(_) => {
+                return Err(AiueosError::Schema(format!(
+                    "{id}: :aiueos/args must be a vector"
+                )))
+            }
         };
 
         Ok(Manifest {
