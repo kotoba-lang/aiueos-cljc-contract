@@ -160,6 +160,20 @@ fn verify_accepts_flags_before_the_path() {
 }
 
 #[test]
+fn verify_edn_reports_structural_errors_as_edn() {
+    // A missing file in --edn mode → EDN error on stdout (not human stderr), exit 1.
+    let (code, out, _e) = aiueos(&["verify", "/no/such/system.aiueos.edn", "--edn"]);
+    assert_eq!(code, 1);
+    let v = kotoba_edn::parse(out.trim()).expect("error is valid EDN");
+    assert_eq!(
+        aiueos::edn::get(&v, "aiueos", "kind")
+            .and_then(|x| x.as_keyword().map(|k| k.name().to_string())),
+        Some("io".to_string())
+    );
+    assert!(aiueos::edn::get(&v, "aiueos", "error").is_some());
+}
+
+#[test]
 fn verify_edn_emits_machine_readable_verdict() {
     // pass: with the IOMMU policy → verified true, output is valid EDN.
     let (code, out, _e) = aiueos(&[

@@ -40,10 +40,39 @@ fn main() -> ExitCode {
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("aiueos: {e}");
+            // In --edn mode, a structural failure is reported as EDN on stdout too,
+            // so an agent consuming the machine-readable surface never has to fall
+            // back to parsing human prose.
+            let edn = rest.iter().any(|a| a == "--edn")
+                && matches!(cmd, "verify" | "inspect" | "up" | "run");
+            if edn {
+                println!("{}", error_edn(&e));
+            } else {
+                eprintln!("aiueos: {e}");
+            }
             ExitCode::FAILURE
         }
     }
+}
+
+/// A structural error rendered as EDN (for --edn mode): `{:aiueos/error "..."
+/// :aiueos/kind :io|:edn|:schema|:denied|:unsafe|:compile|:run}`.
+fn error_edn(e: &aiueos::AiueosError) -> String {
+    use aiueos::AiueosError as Err;
+    use kotoba_edn::EdnValue as E;
+    let kind = match e {
+        Err::Io(_) => "io",
+        Err::Edn(_) => "edn",
+        Err::Schema(_) => "schema",
+        Err::Denied(_) => "denied",
+        Err::Unsafe(_) => "unsafe",
+        Err::Compile(_) => "compile",
+        Err::Run(_) => "run",
+    };
+    kotoba_edn::to_string(&E::map([
+        (E::kw("aiueos", "error"), E::string(e.to_string())),
+        (E::kw("aiueos", "kind"), E::kw_bare(kind)),
+    ]))
 }
 
 fn print_usage() {
