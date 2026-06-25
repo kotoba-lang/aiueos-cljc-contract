@@ -117,6 +117,18 @@ fn audit_replays_a_populated_log() {
 }
 
 #[test]
+fn audit_edn_on_empty_log_is_an_empty_vector() {
+    // An agent consuming --edn must get parseable EDN even when there's nothing —
+    // an empty vector, not a human "(no audit entries)" line or an error.
+    let p = scratch("nonexistent-audit-edn.edn");
+    let _ = std::fs::remove_file(&p);
+    let (code, out, _e) = aiueos(&["audit", "--log", p.to_str().unwrap(), "--edn"]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("valid EDN even when empty");
+    assert_eq!(v.as_vector().map(|x| x.len()), Some(0), "empty log → []");
+}
+
+#[test]
 fn audit_filters_by_event_and_emits_edn() {
     // Use an ISOLATED dir so verify's audit log isn't shared with other tests
     // (the negative filters below rely on the log containing only our entries).
