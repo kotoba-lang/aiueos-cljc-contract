@@ -1,5 +1,5 @@
 /target
-# audit logs written by `aiue run/verify`
-.aiue/
-**/.aiue/
+# audit logs written by `aiueos run/verify`
+.aiueos/
+**/.aiueos/
 *.wasm

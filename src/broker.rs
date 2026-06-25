@@ -3,7 +3,7 @@
 //! confers capabilities, and every decision it makes is audited.
 
 use crate::audit::{AuditLog, Event};
-use crate::error::{AiueError, Result};
+use crate::error::{AiueosError, Result};
 use crate::graph::{CapabilityGraph, System};
 use crate::manifest::Manifest;
 use crate::policy::{self, Grant, Policy};
@@ -49,8 +49,7 @@ impl Broker {
         for m in &system.components {
             match policy::verify_component(m, &graph, &self.policy) {
                 Ok(grant) => {
-                    let caps: Vec<&str> =
-                        grant.capabilities.iter().map(|s| s.as_str()).collect();
+                    let caps: Vec<&str> = grant.capabilities.iter().map(|s| s.as_str()).collect();
                     self.audit
                         .append(Event::Grant, &m.id, &format!("caps: {}", caps.join(" ")))?;
                     grants.push(grant);
@@ -70,7 +69,7 @@ impl Broker {
         if all_violations.is_empty() {
             Ok(grants)
         } else {
-            Err(AiueError::Denied(all_violations))
+            Err(AiueosError::Denied(all_violations))
         }
     }
 
@@ -92,14 +91,14 @@ impl Broker {
                         &format!("[{}] {}", v.kind.label(), v.message),
                     )?;
                 }
-                Err(AiueError::Denied(vs))
+                Err(AiueosError::Denied(vs))
             }
         }
     }
 
     /// Full launch path: verify, safe-check source, compile, and run under the
-    /// manifest's limits. `base` is the directory the manifest's `:aiue/source` /
-    /// `:aiue/wasm` paths resolve against. Returns the i64 the entry produced.
+    /// manifest's limits. `base` is the directory the manifest's `:aiueos/source` /
+    /// `:aiueos/wasm` paths resolve against. Returns the i64 the entry produced.
     #[cfg(feature = "wasm-runtime")]
     pub fn launch(&self, m: &Manifest, base: &Path, graph: &CapabilityGraph) -> Result<i64> {
         // Capability gate (audits grant/deny internally). The conferred capability
@@ -117,9 +116,9 @@ impl Broker {
     #[cfg(feature = "wasm-runtime")]
     pub fn boot(&self, system: &System, _base: &Path) -> Result<BootReport> {
         // Stage 1–2: capability link → topological boot order.
-        let order = system
-            .boot_order()
-            .map_err(|cycle| AiueError::Schema(format!("dependency cycle: {}", cycle.join(" → "))))?;
+        let order = system.boot_order().map_err(|cycle| {
+            AiueosError::Schema(format!("dependency cycle: {}", cycle.join(" → ")))
+        })?;
 
         // Stage 3: policy verification of the whole system (audits each grant/deny).
         // The grants are the per-component conferred capability sets the host ABI
@@ -166,7 +165,7 @@ impl Broker {
     }
 
     /// Shared tail of launch/boot: safe-check source, compile (or load wasm), and
-    /// run under the manifest's limits with the `aiue:host` ABI bound and `caps`
+    /// run under the manifest's limits with the `aiueos:host` ABI bound and `caps`
     /// gating every host call. Threads `bus` in and back out. Does **not** verify
     /// — callers gate first. Returns the entry result and the (possibly updated)
     /// bus.
@@ -179,13 +178,13 @@ impl Broker {
         bus: TopicBus,
     ) -> Result<(i64, TopicBus)> {
         // Obtain wasm: compile source (safe-checked, needs the kototama feature)
-        // or load precompiled bytes / WAT text (`:aiue/wasm`).
+        // or load precompiled bytes / WAT text (`:aiueos/wasm`).
         let wasm: Vec<u8> = match (&m.source, &m.wasm) {
             (Some(src_rel), _) => self.compile_component_source(m, base, src_rel)?,
             (None, Some(wasm_rel)) => std::fs::read(base.join(wasm_rel))?,
             (None, None) => {
-                return Err(AiueError::Schema(format!(
-                    "{}: needs :aiue/source or :aiue/wasm to run",
+                return Err(AiueosError::Schema(format!(
+                    "{}: needs :aiueos/source or :aiueos/wasm to run",
                     m.id
                 )))
             }
@@ -213,7 +212,7 @@ impl Broker {
         Ok((outcome.result, outcome.bus))
     }
 
-    /// Compile a component's `:aiue/source` (safe-checked) to wasm. Requires the
+    /// Compile a component's `:aiueos/source` (safe-checked) to wasm. Requires the
     /// `kototama` feature; without it, a source-based component cannot run.
     #[cfg(feature = "kototama")]
     fn compile_component_source(
@@ -237,8 +236,8 @@ impl Broker {
         Ok(bytes)
     }
 
-    /// Without the `kototama` feature, `:aiue/source` components can't be built —
-    /// use `:aiue/wasm` (precompiled or WAT) instead.
+    /// Without the `kototama` feature, `:aiueos/source` components can't be built —
+    /// use `:aiueos/wasm` (precompiled or WAT) instead.
     #[cfg(all(feature = "wasm-runtime", not(feature = "kototama")))]
     fn compile_component_source(
         &self,
@@ -246,9 +245,9 @@ impl Broker {
         _base: &Path,
         src_rel: &str,
     ) -> Result<Vec<u8>> {
-        Err(AiueError::Run(format!(
-            "compiling :aiue/source ({src_rel}) requires the `kototama` feature; \
-             use :aiue/wasm for precompiled/WAT components"
+        Err(AiueosError::Run(format!(
+            "compiling :aiueos/source ({src_rel}) requires the `kototama` feature; \
+             use :aiueos/wasm for precompiled/WAT components"
         )))
     }
 }

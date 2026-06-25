@@ -39,9 +39,9 @@ impl AuditLog {
         AuditLog { path: path.into() }
     }
 
-    /// Default location: `.aiue/audit.edn` under `dir`.
+    /// Default location: `.aiueos/audit.edn` under `dir`.
     pub fn under(dir: &Path) -> Result<AuditLog> {
-        let d = dir.join(".aiue");
+        let d = dir.join(".aiueos");
         std::fs::create_dir_all(&d)?;
         Ok(AuditLog::new(d.join("audit.edn")))
     }
@@ -60,16 +60,19 @@ impl AuditLog {
     /// Append one audited event.
     pub fn append(&self, event: Event, component: &str, detail: &str) -> Result<()> {
         let entry = EdnValue::map([
-            (EdnValue::kw("aiue", "ts"), EdnValue::int(Self::now_secs())),
             (
-                EdnValue::kw("aiue", "event"),
+                EdnValue::kw("aiueos", "ts"),
+                EdnValue::int(Self::now_secs()),
+            ),
+            (
+                EdnValue::kw("aiueos", "event"),
                 EdnValue::kw_bare(event.keyword()),
             ),
             (
-                EdnValue::kw("aiue", "component"),
+                EdnValue::kw("aiueos", "component"),
                 EdnValue::string(component),
             ),
-            (EdnValue::kw("aiue", "detail"), EdnValue::string(detail)),
+            (EdnValue::kw("aiueos", "detail"), EdnValue::string(detail)),
         ]);
         let line = kotoba_edn::to_string(&entry);
         let mut f = OpenOptions::new()

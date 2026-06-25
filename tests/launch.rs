@@ -1,12 +1,12 @@
-//! Coverage for `Broker::launch` (the single-component path behind `aiue run`)
-//! with host-importing WAT components and its `:aiue/wasm` error handling:
+//! Coverage for `Broker::launch` (the single-component path behind `aiueos run`)
+//! with host-importing WAT components and its `:aiueos/wasm` error handling:
 //! a missing file, malformed bytes, and a host call the component never imported.
 //! Exec-only (WAT) — no kototama.
 #![cfg(feature = "wasm-runtime")]
 
 use aiueos::audit::AuditLog;
 use aiueos::broker::Broker;
-use aiueos::error::AiueError;
+use aiueos::error::AiueosError;
 use aiueos::graph::CapabilityGraph;
 use aiueos::manifest::Manifest;
 use aiueos::policy::Policy;
@@ -50,7 +50,7 @@ fn launch_traps_host_call_without_the_imported_capability() {
     std::fs::write(
         dir.join("rogue.wat"),
         r#"(module
-          (import "aiue:host" "publish" (func $p (param i32 i64)))
+          (import "aiueos:host" "publish" (func $p (param i32 i64)))
           (func (export "tick") (param i64) (result i64)
             (call $p (i32.const 1) (local.get 0))
             (local.get 0)))"#,
@@ -58,11 +58,14 @@ fn launch_traps_host_call_without_the_imported_capability() {
     .unwrap();
     std::fs::write(
         dir.join("rogue.edn"),
-        r#"{:aiue/component :driver/rogue :aiue/kind :driver
-            :aiue/wasm "rogue.wat" :aiue/entry "tick" :aiue/args [5]}"#,
+        r#"{:aiueos/component :driver/rogue :aiueos/kind :driver
+            :aiueos/wasm "rogue.wat" :aiueos/entry "tick" :aiueos/args [5]}"#,
     )
     .unwrap();
-    assert!(matches!(launch_in(&dir, "rogue.edn"), Err(AiueError::Run(_))));
+    assert!(matches!(
+        launch_in(&dir, "rogue.edn"),
+        Err(AiueosError::Run(_))
+    ));
 }
 
 #[test]
@@ -71,12 +74,15 @@ fn malformed_wasm_is_a_clean_run_error() {
     std::fs::write(dir.join("garbage.wat"), "this is not wasm or wat (((").unwrap();
     std::fs::write(
         dir.join("garbage.edn"),
-        r#"{:aiue/component :app/garbage :aiue/kind :app
-            :aiue/wasm "garbage.wat" :aiue/entry "main"}"#,
+        r#"{:aiueos/component :app/garbage :aiueos/kind :app
+            :aiueos/wasm "garbage.wat" :aiueos/entry "main"}"#,
     )
     .unwrap();
     // Parse failure surfaces as a clean Run error, not a panic.
-    assert!(matches!(launch_in(&dir, "garbage.edn"), Err(AiueError::Run(_))));
+    assert!(matches!(
+        launch_in(&dir, "garbage.edn"),
+        Err(AiueosError::Run(_))
+    ));
 }
 
 #[test]
@@ -84,9 +90,12 @@ fn missing_wasm_file_is_an_io_error() {
     let dir = tmpdir();
     std::fs::write(
         dir.join("ghost.edn"),
-        r#"{:aiue/component :app/ghost :aiue/kind :app
-            :aiue/wasm "nope.wat" :aiue/entry "main"}"#,
+        r#"{:aiueos/component :app/ghost :aiueos/kind :app
+            :aiueos/wasm "nope.wat" :aiueos/entry "main"}"#,
     )
     .unwrap();
-    assert!(matches!(launch_in(&dir, "ghost.edn"), Err(AiueError::Io(_))));
+    assert!(matches!(
+        launch_in(&dir, "ghost.edn"),
+        Err(AiueosError::Io(_))
+    ));
 }

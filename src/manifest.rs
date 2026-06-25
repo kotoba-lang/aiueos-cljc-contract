@@ -1,12 +1,30 @@
-//! Component manifests — the `:aiue/...` EDN that describes *what a component is*,
+//! Component manifests — the `:aiueos/...` EDN that describes *what a component is*,
 //! *what it may touch* (capabilities/effects) and *how much it may consume*
 //! (limits). A manifest is data; the broker and policy reasoner decide whether
 //! that data is allowed to run.
 
 use crate::edn;
-use crate::error::{AiueError, Result};
+use crate::error::{AiueosError, Result};
 use kotoba_edn::EdnValue;
 use std::path::Path;
+
+/// Recognized top-level `:aiueos/*` manifest keys. Any other `:aiueos/`-namespaced
+/// key is a typo or an unsupported field and is rejected (see `from_edn`).
+const MANIFEST_KEYS: &[&str] = &[
+    "component",
+    "kind",
+    "trust",
+    "source",
+    "wasm",
+    "imports",
+    "exports",
+    "effects",
+    "requires",
+    "limits",
+    "entry",
+    "args",
+    "device",
+];
 
 /// The kind of a component. This drives default policy and how the runtime
 /// treats it (a `:driver` may request device capabilities; an `:agent` is
@@ -128,30 +146,52 @@ pub struct Manifest {
 impl Manifest {
     pub fn from_edn(v: &EdnValue) -> Result<Manifest> {
         if v.as_map().is_none() {
-            return Err(AiueError::Schema("manifest must be a map".into()));
+            return Err(AiueosError::Schema("manifest must be a map".into()));
         }
-        let id = edn::get_kw(v, "aiue", "component")
-            .ok_or_else(|| AiueError::Schema("manifest missing :aiue/component".into()))?;
+        let id = edn::get_kw(v, "aiueos", "component")
+            .ok_or_else(|| AiueosError::Schema("manifest missing :aiueos/component".into()))?;
 
-        let kind_s = edn::get_kw(v, "aiue", "kind")
-            .ok_or_else(|| AiueError::Schema(format!("{id}: missing :aiue/kind")))?;
+        // Reject unknown `:aiueos/*` keys. A typo like `:aiueos/effcts` would
+        // otherwise silently drop an effect — including a `:dma` effect, which
+        // would mean the DMA→IOMMU gate never fires. Fail loud instead.
+        if let Some(map) = v.as_map() {
+            let mut unknown: Vec<String> = map
+                .keys()
+                .filter_map(|k| k.as_keyword())
+                .filter(|kw| {
+                    kw.namespace() == Some("aiueos") && !MANIFEST_KEYS.contains(&kw.name())
+                })
+                .map(|kw| kw.to_qualified())
+                .collect();
+            if !unknown.is_empty() {
+                unknown.sort();
+                return Err(AiueosError::Schema(format!(
+                    "{id}: unknown manifest key(s): {}",
+                    unknown.join(", ")
+                )));
+            }
+        }
+
+        let kind_s = edn::get_kw(v, "aiueos", "kind")
+            .ok_or_else(|| AiueosError::Schema(format!("{id}: missing :aiueos/kind")))?;
         let kind = Kind::parse(&kind_s)
-            .ok_or_else(|| AiueError::Schema(format!("{id}: unknown :aiue/kind {kind_s}")))?;
+            .ok_or_else(|| AiueosError::Schema(format!("{id}: unknown :aiueos/kind {kind_s}")))?;
 
         // Trust defaults: agents are AI-generated-grade untrusted unless stated.
-        let trust = match edn::get_kw(v, "aiue", "trust") {
+        let trust = match edn::get_kw(v, "aiueos", "trust") {
             Some(t) => Trust::parse(&t)
-                .ok_or_else(|| AiueError::Schema(format!("{id}: unknown :aiue/trust {t}")))?,
+                .ok_or_else(|| AiueosError::Schema(format!("{id}: unknown :aiueos/trust {t}")))?,
             None if kind == Kind::Agent => Trust::AiGenerated,
             None if kind == Kind::KernelExtension => Trust::Trusted,
             None => Trust::Untrusted,
         };
 
-        let limits = match edn::get(v, "aiue", "limits") {
+        let limits = match edn::get(v, "aiueos", "limits") {
             Some(l) => Limits {
                 memory_pages: edn::get_bare(l, "memory-pages")
                     .and_then(|x| x.as_integer())
-                    .unwrap_or(Limits::default().memory_pages as i64) as u32,
+                    .unwrap_or(Limits::default().memory_pages as i64)
+                    as u32,
                 fuel: edn::get_bare(l, "fuel")
                     .and_then(|x| x.as_integer())
                     .unwrap_or(Limits::default().fuel as i64) as u64,
@@ -159,7 +199,7 @@ impl Manifest {
             None => Limits::default(),
         };
 
-        let args = match edn::get(v, "aiue", "args") {
+        let args = match edn::get(v, "aiueos", "args") {
             Some(EdnValue::Vector(xs)) | Some(EdnValue::List(xs)) => {
                 xs.iter().filter_map(|x| x.as_integer()).collect()
             }
@@ -170,14 +210,14 @@ impl Manifest {
             id,
             kind,
             trust,
-            source: edn::get_str(v, "aiue", "source"),
-            wasm: edn::get_str(v, "aiue", "wasm"),
-            imports: edn::kw_collection(edn::get(v, "aiue", "imports")),
-            exports: edn::kw_collection(edn::get(v, "aiue", "exports")),
-            effects: edn::kw_collection(edn::get(v, "aiue", "effects")),
-            requires: edn::kw_collection(edn::get(v, "aiue", "requires")),
+            source: edn::get_str(v, "aiueos", "source"),
+            wasm: edn::get_str(v, "aiueos", "wasm"),
+            imports: edn::kw_collection(edn::get(v, "aiueos", "imports")),
+            exports: edn::kw_collection(edn::get(v, "aiueos", "exports")),
+            effects: edn::kw_collection(edn::get(v, "aiueos", "effects")),
+            requires: edn::kw_collection(edn::get(v, "aiueos", "requires")),
             limits,
-            entry: edn::get_str(v, "aiue", "entry").unwrap_or_else(|| "main".to_string()),
+            entry: edn::get_str(v, "aiueos", "entry").unwrap_or_else(|| "main".to_string()),
             args,
         })
     }

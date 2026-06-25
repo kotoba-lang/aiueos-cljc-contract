@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (core + exec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The semantic core: manifest / capability graph / policy / broker /
+      # safe-kotoba / audit / topic bus. Zero heavy deps.
+      - name: core (no features)
+        run: cargo test --no-default-features --verbose
+      # Execution + the aiueos:host ABI + the robotics pipeline (WAT components).
+      # Needs only wasmtime — not the kototama CLJ compiler.
+      - name: exec + robotics (wasm-runtime)
+        run: cargo test --no-default-features --features wasm-runtime --verbose
+    # Note: the `kototama` feature (CLJ→wasm compilation) is intentionally not run
+    # in CI — kototama resolves only inside the monorepo (path deps to siblings).
+
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check

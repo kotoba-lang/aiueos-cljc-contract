@@ -64,7 +64,7 @@ impl Default for Policy {
             "log/write",
             "clock/monotonic",
             "random/bytes",
-            // pub/sub topic bus (the aiue:host ABI gates publish/poll on these)
+            // pub/sub topic bus (the aiueos:host ABI gates publish/poll on these)
             "topic/publish",
             "topic/subscribe",
             // device-broker primitives (only meaningful with a matching grant)
@@ -104,10 +104,10 @@ impl Policy {
     /// per-trust).
     pub fn from_edn(v: &EdnValue) -> crate::error::Result<Policy> {
         let mut p = Policy::default();
-        for c in edn::kw_collection(edn::get(v, "aiue", "kernel-caps")) {
+        for c in edn::kw_collection(edn::get(v, "aiueos", "kernel-caps")) {
             p.kernel_caps.insert(c);
         }
-        if let Some(EdnValue::Map(g)) = edn::get(v, "aiue", "grants") {
+        if let Some(EdnValue::Map(g)) = edn::get(v, "aiueos", "grants") {
             for (k, caps) in g {
                 if let Some(id) = edn::kw_string(k) {
                     let set: BTreeSet<String> =
@@ -116,7 +116,7 @@ impl Policy {
                 }
             }
         }
-        if let Some(EdnValue::Map(fb)) = edn::get(v, "aiue", "forbid") {
+        if let Some(EdnValue::Map(fb)) = edn::get(v, "aiueos", "forbid") {
             for (k, effs) in fb {
                 if let Some(trust) = edn::kw_string(k).and_then(|s| Trust::parse(&s)) {
                     let set: BTreeSet<String> =

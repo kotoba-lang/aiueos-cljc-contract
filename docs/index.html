@@ -105,23 +105,18 @@
 <section id="start">
   <div class="wrap">
     <h2>Boot a system</h2>
-    <pre><span class="c-mut"># link → order → verify → launch in dependency order, every step audited</span>
-$ <span class="c-acc">aiueos up</span> examples/system.aiue.edn --policy examples/policy/default.edn
-aiueos boot — system `demo`
-  link: 8 capabilities across 4 components
-  order: service/log → driver/virtio-blk → service/fs → app/notes
-  <span class="c-ok">✓</span> service/log         (service) → 0
-  <span class="c-ok">✓</span> driver/virtio-blk   (driver)  → 42
-  <span class="c-ok">✓</span> service/fs          (service) → 0
-  <span class="c-ok">✓</span> app/notes           (app)     → 42
-<span class="c-ok">✓ system up — 4/4 components launched</span>
-
-<span class="c-mut"># a robot as a capability-component graph (sensor → planner → actuator)</span>
-$ <span class="c-acc">aiueos up</span> examples/robot/robot.aiue.edn
+    <pre><span class="c-mut"># a robot as a capability-component graph (sensor → planner → actuator).</span>
+<span class="c-mut"># boot order is DERIVED from the topic dataflow, not the listing order.</span>
+$ <span class="c-acc">aiueos up</span> examples/robot/robot.aiueos.edn
+aiueos boot — system `robot`
   order: driver/sensor → agent/planner → driver/actuator
-  <span class="c-ok">✓</span> driver/sensor    (driver) → 21   <span class="c-mut"># publishes to "scan"</span>
+  <span class="c-ok">✓</span> driver/sensor    (driver) → 21   <span class="c-mut"># publishes 21 to topic "scan"</span>
   <span class="c-ok">✓</span> agent/planner    (agent)  → 42   <span class="c-mut"># polls scan, publishes scan×2 to "cmd"</span>
-  <span class="c-ok">✓</span> driver/actuator  (driver) → 42   <span class="c-mut"># polls cmd, drives it</span></pre>
+  <span class="c-ok">✓</span> driver/actuator  (driver) → 42   <span class="c-mut"># polls cmd, drives it</span>
+<span class="c-ok">✓ system up — 3/3 components launched</span>
+
+<span class="c-mut"># every grant / deny / compile / run is appended to the EDN audit log</span>
+$ <span class="c-acc">aiueos verify</span> examples/system.aiueos.edn   <span class="c-mut"># no IOMMU grant → DMA denied (exit 1)</span></pre>
   </div>
 </section>
 
@@ -129,7 +124,7 @@ $ <span class="c-acc">aiueos up</span> examples/robot/robot.aiue.edn
   <div class="wrap">
     <h2>Capabilities you call at runtime</h2>
     <p class="c-mut" style="margin-top:-12px;font-size:14.5px">The broker-mediated
-      <code>aiue:host</code> ABI enforces capabilities on <em>every call</em>.
+      <code>aiueos:host</code> ABI enforces capabilities on <em>every call</em>.
       A call to a capability you weren't granted <b>traps</b>.</p>
     <table>
       <tr><th>import</th><th>capability</th><th>meaning</th></tr>
@@ -165,7 +160,7 @@ $ <span class="c-acc">aiueos up</span> examples/robot/robot.aiue.edn
     <h2>Where it stands</h2>
     <ul class="lean">
       <li><b>Phase 0 ✓</b> manifests · capability graph · policy reasoner · broker · safe-check · audit · staged boot</li>
-      <li><b>Phase 0+ ✓</b> runtime-enforced capabilities (<code>aiue:host</code>) · pub/sub topic bus · robot demo</li>
+      <li><b>Phase 0+ ✓</b> runtime-enforced capabilities (<code>aiueos:host</code>) · pub/sub topic bus · robot demo</li>
       <li><b>Next</b> named topics → dataflow-aware boot · real-time scheduler · signed manifests/provenance</li>
       <li><b>Later</b> microkernel · real device ABIs (CAN/I2C/SPI/GPIO) · per-surface capability providers · microVM image</li>
     </ul>

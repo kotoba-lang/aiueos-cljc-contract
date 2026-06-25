@@ -11,10 +11,16 @@ path = "src/bin/aiueos.rs"
 
 [dependencies]
 # Manifests, policy, device schemas, audit log — everything is "kotoba" (EDN).
-kotoba-edn = { path = "../kotoba/crates/kotoba-edn" }
-# CLJ/Kotoba subset → wasm. Optional so the manifest/policy/graph core compiles
-# with zero heavy deps.
-kototama = { path = "../kototama", features = ["run"], optional = true }
+# Git dependency so a standalone clone builds without the monorepo. Local dev can
+# override to the in-tree copy via .cargo/config.toml (paths override).
+kotoba-edn = { git = "https://github.com/com-junkawasaki/kotoba", branch = "main", package = "kotoba-edn" }
+# NOTE: the CLJ→wasm compiler `kototama` is intentionally NOT a dependency here.
+# Its own Cargo.toml uses path deps to sibling repos, so it cannot resolve in a
+# standalone clone (it breaks even `cargo build` via dependency resolution). The
+# `kototama` feature below is kept declared (so the `#[cfg(feature = "kototama")]`
+# compile-from-source code stays known and warning-free) but dormant; CLJ
+# compilation returns once kototama is published as a standalone crate, at which
+# point this becomes `kototama = { git = ... }` + `dep:kototama` in the feature.
 # Execution engine — the broker enforces fuel + memory-page limits here. Version
 # pinned to kotoba's workspace (22) so the build is shared, not duplicated.
 wasmtime = { version = "22", optional = true }
@@ -26,11 +32,15 @@ anyhow = { version = "1", optional = true }
 # safe-subset checker, audit, topic bus — needs no heavy deps and is always built.
 #
 # `wasm-runtime` adds *execution*: instantiate wasm (binary or WAT) under fuel +
-# memory limits with the broker-mediated `aiue:host` ABI. Needs only wasmtime.
+# memory limits with the broker-mediated `aiueos:host` ABI. Needs only wasmtime.
 #
 # `kototama` adds *compilation* of CLJ/Kotoba source → wasm (pulls the kototama
 # toolchain) and implies `wasm-runtime` to run the result. Split out so the host
 # ABI / WAT components build and test without the CLJ compiler.
-default = ["wasm-runtime", "kototama"]
+# Default = execute wasm (binary/WAT). The CLJ compiler (`kototama`) is opt-in
+# because it only resolves inside the monorepo (path dep with sibling path deps).
+default = ["wasm-runtime"]
 wasm-runtime = ["dep:wasmtime", "dep:anyhow"]
-kototama = ["dep:kototama", "wasm-runtime"]
+# Dormant: declared so cfg gates are known, but adds no dependency (see note above).
+# Enabling it without the kototama crate present is unsupported (monorepo-only).
+kototama = ["wasm-runtime"]

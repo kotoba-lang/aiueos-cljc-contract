@@ -1,7 +1,7 @@
-//! Integration test for the boot sequence (`aiue up`): the example system must
-//! boot in dependency order with the IOMMU policy, and must refuse to boot
-//! without it.
-#![cfg(feature = "kototama")]
+//! Integration test for the boot sequence (`aiueos up`). The resident and
+//! IOMMU-deny paths need only the runtime (they don't compile source); the
+//! full 4-component success path compiles CLJ examples and so needs `kototama`.
+#![cfg(feature = "wasm-runtime")]
 
 use aiueos::audit::AuditLog;
 use aiueos::broker::Broker;
@@ -14,15 +14,22 @@ fn scratch_audit(name: &str) -> AuditLog {
     AuditLog::new(std::env::temp_dir().join(name))
 }
 
+// Compiles the CLJ example components → requires the kototama feature (monorepo).
+#[cfg(feature = "kototama")]
 #[test]
 fn boots_the_example_system_in_dependency_order() {
-    let sys = System::load(Path::new("examples/system.aiue.edn")).expect("system loads");
+    let sys = System::load(Path::new("examples/system.aiueos.edn")).expect("system loads");
     let policy = Policy::load(Path::new("examples/policy/default.edn")).expect("policy loads");
     let broker = Broker::new(policy, scratch_audit("aiueos-boot-ok.edn"));
 
     // Providers must precede consumers: driver before fs, fs+log before the app.
     let order = sys.boot_order().expect("acyclic");
-    let pos = |id: &str| order.iter().position(|&i| sys.components[i].id == id).unwrap();
+    let pos = |id: &str| {
+        order
+            .iter()
+            .position(|&i| sys.components[i].id == id)
+            .unwrap()
+    };
     assert!(pos("driver/virtio-blk") < pos("service/fs"));
     assert!(pos("service/fs") < pos("app/notes"));
     assert!(pos("service/log") < pos("app/notes"));
@@ -39,10 +46,10 @@ fn boots_the_example_system_in_dependency_order() {
 
 #[test]
 fn resident_component_with_no_code_launches_as_resident() {
-    // A pure manifest (no :aiue/source / :aiue/wasm) passes the gate but has
+    // A pure manifest (no :aiueos/source / :aiueos/wasm) passes the gate but has
     // nothing to execute — it boots as a resident with no result.
     let svc = Manifest::parse_str(
-        "{:aiue/component :svc/resident :aiue/kind :service :aiue/exports #{:x/y}}",
+        "{:aiueos/component :svc/resident :aiueos/kind :service :aiueos/exports #{:x/y}}",
     )
     .unwrap();
     let sys = System::from_manifests("resident-demo", vec![svc]);
@@ -58,7 +65,7 @@ fn resident_component_with_no_code_launches_as_resident() {
 
 #[test]
 fn boot_aborts_without_iommu_grant() {
-    let sys = System::load(Path::new("examples/system.aiue.edn")).expect("system loads");
+    let sys = System::load(Path::new("examples/system.aiueos.edn")).expect("system loads");
     let broker = Broker::new(Policy::default(), scratch_audit("aiueos-boot-deny.edn"));
     // Default policy grants no IOMMU → the driver's :dma effect is denied → no boot.
     assert!(broker.boot(&sys, Path::new("examples")).is_err());

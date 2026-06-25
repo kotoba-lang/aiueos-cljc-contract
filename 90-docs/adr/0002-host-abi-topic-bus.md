@@ -1,4 +1,4 @@
-# ADR-0002 — Runtime-enforced capabilities: the `aiue:host` ABI + topic bus
+# ADR-0002 — Runtime-enforced capabilities: the `aiueos:host` ABI + topic bus
 
 - Status: accepted
 - Date: 2026-06-25
@@ -6,7 +6,7 @@
 ## Context
 
 Phase-0 (ADR-0001) verified capabilities *statically* — a manifest declares
-`:aiue/imports`, the reasoner checks they resolve, the broker confers a set. But
+`:aiueos/imports`, the reasoner checks they resolve, the broker confers a set. But
 the running components were pure compute: they could not actually *call* a
 capability, so the conferred set was never enforced at run time. For a robot OS
 this is the whole game: "the vision node cannot drive the motors" must be
@@ -14,7 +14,7 @@ enforced when the node runs, not merely asserted in a manifest.
 
 ## Decision
 
-Add a broker-mediated host ABI, `aiue:host`, bound via a wasmtime `Linker`, where
+Add a broker-mediated host ABI, `aiueos:host`, bound via a wasmtime `Linker`, where
 **every host function is gated on the conferred capability set** carried in the
 store context. A call to a capability the component wasn't granted **traps** — it
 cannot proceed. Capabilities become runtime enforcement, not just a static claim.
@@ -42,14 +42,14 @@ matching calls and traps the rest.
 ## Decouple execution from compilation (feature split)
 
 Calling host functions requires the component to *import* them, which the
-kototama CLJ compiler does not emit for arbitrary aiue capabilities. So
+kototama CLJ compiler does not emit for arbitrary aiueos capabilities. So
 host-calling components are authored as **WAT** (or precompiled wasm) referenced
-via `:aiue/wasm`, which wasmtime loads directly — no kototama needed.
+via `:aiueos/wasm`, which wasmtime loads directly — no kototama needed.
 
 This motivated splitting the old `wasm-runtime` feature in two:
 
 - **`wasm-runtime`** — *execute* wasm (binary/WAT) under fuel + memory limits with
-  the `aiue:host` ABI. Needs only wasmtime.
+  the `aiueos:host` ABI. Needs only wasmtime.
 - **`kototama`** — *compile* CLJ → wasm; implies `wasm-runtime`.
 
 Besides being cleaner, the split let the host ABI / robotics work build and test
@@ -59,7 +59,7 @@ not depend on the compiler.
 
 ## Consequences
 
-- `aiueos up examples/robot/robot.aiue.edn` boots a 3-node robot: sensor publishes
+- `aiueos up examples/robot/robot.aiueos.edn` boots a 3-node robot: sensor publishes
   21 → planner polls and publishes 42 → actuator polls and drives 42. The planner
   is an `:agent` (AI-generated trust) doing topic IO while still denied
   network/secrets/persistence. The actuator imports only `topic/subscribe`, so a

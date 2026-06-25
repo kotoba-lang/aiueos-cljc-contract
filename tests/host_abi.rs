@@ -1,4 +1,4 @@
-//! Direct coverage of the `aiue:host` ABI surface that the robot pipeline
+//! Direct coverage of the `aiueos:host` ABI surface that the robot pipeline
 //! doesn't exercise: the `log` and `clock` host calls, capability attenuation
 //! (granted *some* caps but not the needed one), and call accounting
 //! (`logs` / `host_calls`). WAT components — `wasm-runtime`, no kototama.
@@ -9,27 +9,27 @@ use aiueos::topic::TopicBus;
 use std::collections::BTreeSet;
 
 const LOGGER: &str = r#"(module
-  (import "aiue:host" "log" (func $log (param i64)))
+  (import "aiueos:host" "log" (func $log (param i64)))
   (func (export "run") (param $v i64) (result i64)
     (call $log (local.get $v))
     (local.get $v)))"#;
 
 const LOG_TWICE: &str = r#"(module
-  (import "aiue:host" "log" (func $log (param i64)))
+  (import "aiueos:host" "log" (func $log (param i64)))
   (func (export "run") (param $v i64) (result i64)
     (call $log (local.get $v))
     (call $log (i64.add (local.get $v) (i64.const 1)))
     (local.get $v)))"#;
 
 const CLOCKED: &str = r#"(module
-  (import "aiue:host" "clock" (func $clock (result i64)))
+  (import "aiueos:host" "clock" (func $clock (result i64)))
   (func (export "run") (result i64)
     (call $clock)))"#;
 
 // poll (topic 1) then publish (topic 2): needs BOTH subscribe and publish.
 const POLL_THEN_PUBLISH: &str = r#"(module
-  (import "aiue:host" "poll"    (func $poll    (param i32) (result i64)))
-  (import "aiue:host" "publish" (func $publish (param i32 i64)))
+  (import "aiueos:host" "poll"    (func $poll    (param i32) (result i64)))
+  (import "aiueos:host" "publish" (func $publish (param i32 i64)))
   (func (export "run") (result i64)
     (local $v i64)
     (local.set $v (call $poll (i32.const 1)))
@@ -41,7 +41,15 @@ fn caps(items: &[&str]) -> BTreeSet<String> {
 }
 
 fn run(wat: &str, args: &[i64], caps: &BTreeSet<String>) -> aiueos::Result<host::HostOutcome> {
-    host::run_with_host(wat.as_bytes(), "run", args, 1_000_000, 1, caps, TopicBus::new())
+    host::run_with_host(
+        wat.as_bytes(),
+        "run",
+        args,
+        1_000_000,
+        1,
+        caps,
+        TopicBus::new(),
+    )
 }
 
 #[test]
@@ -51,7 +59,10 @@ fn log_requires_log_write_and_collects_samples() {
     assert_eq!(o.logs, vec![7], "logged sample captured");
     assert_eq!(o.host_calls, 1);
 
-    assert!(run(LOGGER, &[7], &BTreeSet::new()).is_err(), "log without log/write traps");
+    assert!(
+        run(LOGGER, &[7], &BTreeSet::new()).is_err(),
+        "log without log/write traps"
+    );
 }
 
 #[test]

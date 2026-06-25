@@ -1,12 +1,15 @@
 ;; The planner is an AI agent: it subscribes to "scan" and publishes "cmd".
 ;; As :ai-generated it is the least-trusted node, but topic IO is permitted —
 ;; network/secrets/persistence are not.
-{:aiue/component :agent/planner
- :aiue/kind :agent
- :aiue/wasm "planner.wat"
- :aiue/entry "tick"
- :aiue/args [0]
- :aiue/imports #{:topic/subscribe :topic/publish}
- :aiue/exports #{:topic/cmd}
- :aiue/effects #{:compute}
- :aiue/limits {:memory-pages 4 :fuel 1000000}}
+{:aiueos/component :agent/planner
+ :aiueos/kind :agent
+ :aiueos/wasm "planner.wat"
+ :aiueos/entry "tick"
+ :aiueos/args [0]
+ ;; subscribes to the "scan" topic (consumes :topic/scan) and publishes "cmd"
+ ;; (provides :topic/cmd). The named-topic capabilities make the wiring explicit
+ ;; in the capability graph, so boot order follows the dataflow.
+ :aiueos/imports #{:topic/subscribe :topic/publish :topic/scan}
+ :aiueos/exports #{:topic/cmd}
+ :aiueos/effects #{:compute}
+ :aiueos/limits {:memory-pages 4 :fuel 1000000}}

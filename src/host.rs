@@ -1,4 +1,4 @@
-//! The broker-mediated host ABI (`aiue:host`). This is where capabilities stop
+//! The broker-mediated host ABI (`aiueos:host`). This is where capabilities stop
 //! being a static manifest claim and become **runtime enforcement**: a component
 //! can only call a host function if its conferred capability set contains the
 //! matching capability. A call without the capability *traps* — it does not
@@ -17,7 +17,7 @@
 //! value* through each run so the broker can pass one bus across a whole booted
 //! system — producer → consumer dataflow without shared mutable state.
 
-use crate::error::{AiueError, Result};
+use crate::error::{AiueosError, Result};
 use crate::topic::TopicBus;
 use std::collections::BTreeSet;
 use wasmtime::{
@@ -46,8 +46,8 @@ pub struct HostOutcome {
     pub bus: TopicBus,
 }
 
-fn run_err(e: impl std::fmt::Display) -> AiueError {
-    AiueError::Run(e.to_string())
+fn run_err(e: impl std::fmt::Display) -> AiueosError {
+    AiueosError::Run(e.to_string())
 }
 
 /// The capability gate. Returns a trap (host error) when `cap` isn't granted.
@@ -59,10 +59,10 @@ fn gate(ctx: &HostCtx, cap: &str, what: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Instantiate `wasm` (binary or WAT text) with the `aiue:host` ABI bound, run
+/// Instantiate `wasm` (binary or WAT text) with the `aiueos:host` ABI bound, run
 /// `entry(args)` under fuel + memory limits with `caps` gating every host call,
 /// threading `bus` through. A denied host call traps and surfaces as
-/// [`AiueError::Run`].
+/// [`AiueosError::Run`].
 pub fn run_with_host(
     wasm: &[u8],
     entry: &str,
@@ -80,24 +80,32 @@ pub fn run_with_host(
 
     let mut linker: Linker<HostCtx> = Linker::new(&engine);
     linker
-        .func_wrap("aiue:host", "log", |mut c: Caller<'_, HostCtx>, v: i64| -> anyhow::Result<()> {
-            gate(c.data(), "log/write", "log")?;
-            let d = c.data_mut();
-            d.logs.push(v);
-            d.calls += 1;
-            Ok(())
-        })
-        .map_err(run_err)?;
-    linker
-        .func_wrap("aiue:host", "clock", |mut c: Caller<'_, HostCtx>| -> anyhow::Result<i64> {
-            gate(c.data(), "clock/monotonic", "clock")?;
-            c.data_mut().calls += 1;
-            Ok(0) // Phase-0 deterministic monotonic stub.
-        })
+        .func_wrap(
+            "aiueos:host",
+            "log",
+            |mut c: Caller<'_, HostCtx>, v: i64| -> anyhow::Result<()> {
+                gate(c.data(), "log/write", "log")?;
+                let d = c.data_mut();
+                d.logs.push(v);
+                d.calls += 1;
+                Ok(())
+            },
+        )
         .map_err(run_err)?;
     linker
         .func_wrap(
-            "aiue:host",
+            "aiueos:host",
+            "clock",
+            |mut c: Caller<'_, HostCtx>| -> anyhow::Result<i64> {
+                gate(c.data(), "clock/monotonic", "clock")?;
+                c.data_mut().calls += 1;
+                Ok(0) // Phase-0 deterministic monotonic stub.
+            },
+        )
+        .map_err(run_err)?;
+    linker
+        .func_wrap(
+            "aiueos:host",
             "publish",
             |mut c: Caller<'_, HostCtx>, topic: i32, value: i64| -> anyhow::Result<()> {
                 gate(c.data(), "topic/publish", "publish")?;
@@ -110,7 +118,7 @@ pub fn run_with_host(
         .map_err(run_err)?;
     linker
         .func_wrap(
-            "aiue:host",
+            "aiueos:host",
             "poll",
             |mut c: Caller<'_, HostCtx>, topic: i32| -> anyhow::Result<i64> {
                 gate(c.data(), "topic/subscribe", "poll")?;
@@ -138,7 +146,7 @@ pub fn run_with_host(
     let instance = linker.instantiate(&mut store, &module).map_err(run_err)?;
     let f = instance
         .get_func(&mut store, entry)
-        .ok_or_else(|| AiueError::Run(format!("module has no exported function `{entry}`")))?;
+        .ok_or_else(|| AiueosError::Run(format!("module has no exported function `{entry}`")))?;
 
     let ty = f.ty(&store);
     let params: Vec<Val> = ty
@@ -166,7 +174,11 @@ pub fn run_with_host(
         Some(Val::I32(v)) => *v as i64,
         Some(Val::I64(v)) => *v,
         None => 0,
-        other => return Err(AiueError::Run(format!("unexpected result kind: {other:?}"))),
+        other => {
+            return Err(AiueosError::Run(format!(
+                "unexpected result kind: {other:?}"
+            )))
+        }
     };
     let data = store.into_data();
     Ok(HostOutcome {

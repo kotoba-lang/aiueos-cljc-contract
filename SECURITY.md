@@ -28,7 +28,7 @@ explicit grant, and that whatever does happen is **audited**.
    primitive, or an explicit policy grant; anything else is an
    `unresolved-capability` denial before launch.
 2. **Runtime-enforced gates, not convention.** Capabilities aren't just a static
-   claim — the `aiue:host` ABI checks the conferred set on **every host call**.
+   claim — the `aiueos:host` ABI checks the conferred set on **every host call**.
    A call to an ungranted capability *traps*; holding some capabilities never
    leaks the ones you weren't given (capability attenuation is tested).
 3. **Small TCB.** Only the broker, the wasm runtime/host ABI, the safe-subset

@@ -1,5 +1,8 @@
 # aiueos
 
+[![CI](https://github.com/com-junkawasaki/aiueos/actions/workflows/ci.yml/badge.svg)](https://github.com/com-junkawasaki/aiueos/actions/workflows/ci.yml)
+[![docs](https://img.shields.io/badge/site-com--junkawasaki.github.io%2Faiueos-7cc4ff)](https://com-junkawasaki.github.io/aiueos/)
+
 **A capability-secure, Wasm-component operating system — Kotoba-defined,
 Kototama-executed, AI-agent-native.**
 
@@ -41,7 +44,7 @@ services, a virtio-blk *logic* stub, and a working robot pipeline over the host
 ABI. The microkernel, real device ABIs (MMIO/DMA/IRQ), per-surface capability
 providers and the microVM image are later phases — but the seams they need
 (`:effects`, `:requires #{:iommu}`, kernel-provided capabilities, the
-`aiue:host` gate) are already modeled, so those phases slot in without reshaping
+`aiueos:host` gate) are already modeled, so those phases slot in without reshaping
 the core.
 
 ## Where it sits
@@ -63,20 +66,20 @@ aiueos depends on two sibling repos:
 
 | module | role |
 |---|---|
-| `manifest` | `:aiue/...` component descriptions → `Manifest` |
+| `manifest` | `:aiueos/...` component descriptions → `Manifest` |
 | `graph` | system graph → capability graph (capability → providers) |
 | `policy` | the reasoner: resolve imports, enforce effects & the driver-DMA rule |
 | `broker` | the trusted seam: verify → safe-check → compile → run, all audited; `boot` launches a whole system in dependency order |
 | `safe` | the safe-kotoba subset gate (no eval/require/slurp/reflection) |
 | `audit` | append-only EDN audit log (itself kotoba) |
 | `topic` | in-process publish/subscribe bus — the ROS-topic analogue |
-| `host` | the broker-mediated `aiue:host` ABI: capability-gated host calls (feature `wasm-runtime`) |
+| `host` | the broker-mediated `aiueos:host` ABI: capability-gated host calls (feature `wasm-runtime`) |
 | `runtime` | kototama compile (`kototama`) + wasm execution (`wasm-runtime`) |
 
 ### Features
 
 - **`wasm-runtime`** — *execute* wasm (binary or WAT) under fuel + memory limits
-  with the `aiue:host` ABI. Needs only wasmtime.
+  with the `aiueos:host` ABI. Needs only wasmtime.
 - **`kototama`** — *compile* CLJ/Kotoba source → wasm (pulls the kototama
   toolchain); implies `wasm-runtime`. Split out so the host ABI and WAT
   components build and test without the CLJ compiler.
@@ -87,9 +90,9 @@ build it with `--no-default-features` for a fast manifest/policy/graph engine.
 ## The model in one breath
 
 1. **Everything is a component** — apps, services, drivers, agents, brokers,
-   policies. (`:aiue/kind`)
-2. **Everything is a capability** — a component lists what it `:aiue/imports`
-   and `:aiue/exports`; it can touch nothing else. Imports must resolve to
+   policies. (`:aiueos/kind`)
+2. **Everything is a capability** — a component lists what it `:aiueos/imports`
+   and `:aiueos/exports`; it can touch nothing else. Imports must resolve to
    another component’s export, a kernel primitive, or an explicit grant.
 3. **Everything is kotoba** — the description is data the OS *reasons over*, not
    a config file: the policy reasoner decides DMA grants, effect legality, and
@@ -109,39 +112,43 @@ build it with `--no-default-features` for a fast manifest/policy/graph engine.
 ## CLI
 
 ```bash
-# build for your host (a .cargo/config defaults the workspace to wasm32):
-cargo build --target aarch64-apple-darwin
-BIN=target/aarch64-apple-darwin/debug/aiueos
+# standalone clone:
+cargo build            # → target/debug/aiueos
+BIN=target/debug/aiueos
+# (inside the monorepo, a parent .cargo/config defaults to wasm32, so add
+#  --target "$(rustc -vV | sed -n 's/host: //p')" and use that target dir.)
 
-# inspect the capability graph + per-component verdicts
-$BIN inspect examples/system.aiue.edn --policy examples/policy/default.edn
+# boot the robot system (WAT components → no compiler needed; works standalone):
+# link → order (derived from topic dataflow) → verify → launch, all audited
+$BIN up examples/robot/robot.aiueos.edn
+#  aiueos boot — system `robot`
+#    order: driver/sensor → agent/planner → driver/actuator
+#    ✓ driver/sensor    (driver) → 21     # publishes 21 to topic "scan"
+#    ✓ agent/planner    (agent)  → 42     # polls scan, publishes scan×2 to "cmd"
+#    ✓ driver/actuator  (driver) → 42     # polls cmd, drives it
+#  ✓ system up — 3/3 components launched
 
-# boot the whole system: link → order → verify → launch in dependency order
-$BIN up examples/system.aiue.edn --policy examples/policy/default.edn
-#  aiueos boot — system `demo`
-#    link: 8 capabilities across 4 components
-#    order: service/log → driver/virtio-blk → service/fs → app/notes
-#    ✓ service/log         (service) → 0
-#    ✓ driver/virtio-blk   (driver)  → 42
-#    ✓ service/fs          (service) → 0
-#    ✓ app/notes           (app)     → 42
-#  ✓ system up — 4/4 components launched
-# (without --policy the driver's DMA is denied and the boot aborts before launch)
+# inspect a capability graph + per-component verdicts
+$BIN inspect examples/system.aiueos.edn
 
-# verify (no policy → the driver's DMA is denied, exit 1)
-$BIN verify examples/system.aiue.edn
+# verify (default policy grants no IOMMU → the driver's DMA is denied, exit 1)
+$BIN verify examples/system.aiueos.edn
 
-# compile + run a component under its fuel/memory limits (audited)
-$BIN run examples/apps/notes.edn --system examples/system.aiue.edn \
-                                 --policy examples/policy/default.edn
-#  ✓ app/notes :: main([21]) = 42
+# run a single host-importing component (fresh bus, audited)
+$BIN run examples/robot/sensor.edn --system examples/robot/robot.aiueos.edn
+#  ✓ driver/sensor :: tick([21]) = 21
 
 # gate a source against the safe-kotoba subset
 $BIN check examples/apps/notes.clj
 
 # replay the audit log
-$BIN audit --log examples/.aiue/audit.edn
+$BIN audit --log examples/robot/.aiueos/audit.edn
 ```
+
+> The CLJ example system (`examples/system.aiueos.edn`, with `.clj` components)
+> and `aiueos compile` need the **`kototama`** feature — a monorepo-only build,
+> since the kototama compiler resolves only alongside its sibling repos. The
+> robot system above is pure WAT and needs nothing but the default build.
 
 ```text
 aiueos verify  <manifest|system>.edn [--policy p.edn]   capability + policy check
@@ -161,20 +168,20 @@ adapter and is later-phase work — but the `:effects`/`:requires` seams are
 already declared so policy can gate DMA today.
 
 ```edn
-{:aiue/component :driver/virtio-blk
- :aiue/kind :driver
- :aiue/source "virtio_blk.clj"
- :aiue/imports #{:pci/config :dma/map :irq/subscribe :mmio/map}
- :aiue/exports #{:block/read :block/write}
- :aiue/effects #{:device-io :dma :interrupt}
- :aiue/requires #{:iommu}
- :aiue/limits {:memory-pages 32 :fuel 10000000}}
+{:aiueos/component :driver/virtio-blk
+ :aiueos/kind :driver
+ :aiueos/source "virtio_blk.clj"
+ :aiueos/imports #{:pci/config :dma/map :irq/subscribe :mmio/map}
+ :aiueos/exports #{:block/read :block/write}
+ :aiueos/effects #{:device-io :dma :interrupt}
+ :aiueos/requires #{:iommu}
+ :aiueos/limits {:memory-pages 32 :fuel 10000000}}
 ```
 
 ## Robotics: capabilities you actually *call* at run time
 
 Capabilities aren't just a static manifest claim — the broker-mediated
-`aiue:host` ABI **enforces them at call time**. A component may call a host
+`aiueos:host` ABI **enforces them at call time**. A component may call a host
 function only if its conferred capability set contains the matching capability;
 a call without it **traps**.
 
@@ -191,7 +198,7 @@ component, so a producer's `publish` is visible to a later consumer's `poll` —
 a running sensor → planner → actuator dataflow over capability-gated nodes:
 
 ```bash
-$BIN up examples/robot/robot.aiue.edn
+$BIN up examples/robot/robot.aiueos.edn
 #  aiueos boot — system `robot`
 #    order: driver/sensor → agent/planner → driver/actuator
 #    ✓ driver/sensor    (driver) → 21     # publishes 21 to topic "scan"
@@ -211,25 +218,34 @@ WAT/compute and topics are numeric.)
 
 ## Build & test
 
+A standalone clone builds out of the box — `kotoba-edn` is a git dependency, so
+no sibling checkout is needed for the default (execution + robotics) build:
+
 ```bash
-HOST=$(rustc -vV | sed -n 's/host: //p')
-
-# fast: semantic core only (no wasmtime)
-cargo test --no-default-features --target "$HOST"
-
-# execution + host ABI + robotics, without the CLJ compiler
-cargo test --no-default-features --features wasm-runtime --target "$HOST"
-
-# full: + kototama CLJ→wasm compilation
-cargo test --target "$HOST"
+# default = execute wasm (binary/WAT) + the aiueos:host ABI + robotics
+cargo test
+cargo test --no-default-features            # semantic core only (no wasmtime)
+cargo test --features wasm-runtime          # explicit; same as default
 ```
+
+The **`kototama`** feature (compile CLJ/Kotoba source → wasm) is opt-in and only
+resolves **inside the monorepo** — kototama is a path dependency whose own
+manifest points at its siblings:
+
+```bash
+# from a full com-junkawasaki checkout (aiueos next to kotoba/ and kototama/):
+cargo test --features kototama --target "$(rustc -vV | sed -n 's/host: //p')"
+```
+
+(The `--target` is only needed in the monorepo, where a parent `.cargo/config`
+defaults the build target to wasm32.)
 
 ## Roadmap (this crate = Phase 0)
 
 | phase | scope | status |
 |---|---|---|
 | 0 | manifests, capability graph, policy reasoner, broker, safe-check, audit, `aiueos run`, staged boot (`aiueos up`, Stage 0–4) | ✅ this crate |
-| 0+ | **runtime-enforced capabilities**: `aiue:host` ABI + pub/sub topic bus → sensor→planner→actuator robot demo | ✅ this crate |
+| 0+ | **runtime-enforced capabilities**: `aiueos:host` ABI + pub/sub topic bus → sensor→planner→actuator robot demo | ✅ this crate |
 | 1 | richer kotoba manifest/policy/proof system | 🔜 |
 | 2 | typed safe-kotoba compiler (effects + capabilities in the type system) | 🔜 |
 | 3 | real service components (log/kv/vfs/net-proxy) | 🔜 |

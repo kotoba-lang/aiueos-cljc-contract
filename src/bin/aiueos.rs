@@ -83,13 +83,13 @@ fn audit_for(path: &Path) -> aiueos::Result<AuditLog> {
     AuditLog::under(dir)
 }
 
-/// True if the EDN file is a system graph (`:aiue/components`) rather than a
+/// True if the EDN file is a system graph (`:aiueos/components`) rather than a
 /// single component manifest.
 fn is_system(path: &Path) -> bool {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|s| kotoba_edn::parse(&s).ok())
-        .map(|v| aiueos::edn::get(&v, "aiue", "components").is_some())
+        .map(|v| aiueos::edn::get(&v, "aiueos", "components").is_some())
         .unwrap_or(false)
 }
 
@@ -102,7 +102,11 @@ fn cmd_verify(args: &[String]) -> aiueos::Result<()> {
     if is_system(&path) {
         let sys = System::load(&path)?;
         let grants = broker.verify_system(&sys)?;
-        println!("✓ system `{}` verified — {} component(s):", sys.name, grants.len());
+        println!(
+            "✓ system `{}` verified — {} component(s):",
+            sys.name,
+            grants.len()
+        );
         for g in &grants {
             println!(
                 "  ✓ {}  caps: {}",
@@ -179,7 +183,10 @@ fn cmd_run(args: &[String]) -> aiueos::Result<()> {
     {
         let target = positional(args).ok_or_else(|| schema("run needs a manifest"))?;
         let path = PathBuf::from(target);
-        let base = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+        let base = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
         let m = Manifest::load(&path)?;
         let policy = load_policy(args)?;
         let broker = Broker::new(policy, audit_for(&path)?);
@@ -207,7 +214,10 @@ fn cmd_up(args: &[String]) -> aiueos::Result<()> {
     {
         let target = positional(args).ok_or_else(|| schema("up needs a system file"))?;
         let path = PathBuf::from(target);
-        let base = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+        let base = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
         let sys = System::load(&path)?;
         let policy = load_policy(args)?;
         let broker = Broker::new(policy, audit_for(&path)?);
@@ -223,8 +233,10 @@ fn cmd_up(args: &[String]) -> aiueos::Result<()> {
         );
         match sys.boot_order() {
             Ok(order) => {
-                let names: Vec<&str> =
-                    order.iter().map(|&i| sys.components[i].id.as_str()).collect();
+                let names: Vec<&str> = order
+                    .iter()
+                    .map(|&i| sys.components[i].id.as_str())
+                    .collect();
                 println!("  order: {}", names.join(" → "));
             }
             Err(cycle) => {
@@ -254,7 +266,9 @@ fn cmd_compile(args: &[String]) -> aiueos::Result<()> {
     #[cfg(not(feature = "kototama"))]
     {
         let _ = args;
-        return Err(run_err("built without the `kototama` feature (CLJ compiler)"));
+        return Err(run_err(
+            "built without the `kototama` feature (CLJ compiler)",
+        ));
     }
     #[cfg(feature = "kototama")]
     {
@@ -265,7 +279,7 @@ fn cmd_compile(args: &[String]) -> aiueos::Result<()> {
             let m = Manifest::load(&path)?;
             let rel = m
                 .source
-                .ok_or_else(|| schema("manifest has no :aiue/source to compile"))?;
+                .ok_or_else(|| schema("manifest has no :aiueos/source to compile"))?;
             let sp = path.parent().unwrap_or_else(|| Path::new(".")).join(&rel);
             let s = std::fs::read_to_string(&sp)?;
             (sp, s)
@@ -302,29 +316,35 @@ fn cmd_check(args: &[String]) -> aiueos::Result<()> {
 fn cmd_audit(args: &[String]) -> aiueos::Result<()> {
     let log = match flag(args, "--log") {
         Some(p) => AuditLog::new(p),
-        None => AuditLog::new(PathBuf::from(".aiue/audit.edn")),
+        None => AuditLog::new(PathBuf::from(".aiueos/audit.edn")),
     };
     let entries = log.read()?;
     if entries.is_empty() {
         println!("(no audit entries at {})", log.path().display());
         return Ok(());
     }
-    println!("audit log: {} ({} entries)", log.path().display(), entries.len());
+    println!(
+        "audit log: {} ({} entries)",
+        log.path().display(),
+        entries.len()
+    );
     for e in &entries {
-        let ts = aiueos::edn::get(e, "aiue", "ts").and_then(|v| v.as_integer()).unwrap_or(0);
-        let ev = aiueos::edn::get_kw(e, "aiue", "event").unwrap_or_default();
-        let comp = aiueos::edn::get_str(e, "aiue", "component").unwrap_or_default();
-        let detail = aiueos::edn::get_str(e, "aiue", "detail").unwrap_or_default();
+        let ts = aiueos::edn::get(e, "aiueos", "ts")
+            .and_then(|v| v.as_integer())
+            .unwrap_or(0);
+        let ev = aiueos::edn::get_kw(e, "aiueos", "event").unwrap_or_default();
+        let comp = aiueos::edn::get_str(e, "aiueos", "component").unwrap_or_default();
+        let detail = aiueos::edn::get_str(e, "aiueos", "detail").unwrap_or_default();
         println!("  [{ts}] {ev:<8} {comp:<24} {detail}");
     }
     Ok(())
 }
 
-fn schema(msg: &str) -> aiueos::AiueError {
-    aiueos::AiueError::Schema(msg.to_string())
+fn schema(msg: &str) -> aiueos::AiueosError {
+    aiueos::AiueosError::Schema(msg.to_string())
 }
 
 #[allow(dead_code)] // only used by the feature-disabled command stubs
-fn run_err(msg: &str) -> aiueos::AiueError {
-    aiueos::AiueError::Run(msg.to_string())
+fn run_err(msg: &str) -> aiueos::AiueosError {
+    aiueos::AiueosError::Run(msg.to_string())
 }

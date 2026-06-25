@@ -5,11 +5,11 @@
 //! reflection, no ambient filesystem/network/process access. The kototama
 //! compiler already rejects most of this by *not implementing it*, but the
 //! checker is an explicit, earlier gate that returns a security-shaped error
-//! (`AiueError::Unsafe`) instead of an opaque "unknown symbol" compile failure.
+//! (`AiueosError::Unsafe`) instead of an opaque "unknown symbol" compile failure.
 //!
 //! The check is a conservative denylist over every symbol in the source tree.
 
-use crate::error::{AiueError, Result};
+use crate::error::{AiueosError, Result};
 use kotoba_edn::EdnValue;
 
 /// Symbols (by bare name *or* namespace) that are never allowed in safe-kotoba.
@@ -65,7 +65,9 @@ fn flag(sym: &kotoba_edn::Symbol, reasons: &mut Vec<String>) {
         .any(|d| token_hit(name, d) || ns.map_or(false, |n| token_hit(n, d)));
     if hit {
         let q = sym.to_qualified();
-        reasons.push(format!("forbidden symbol `{q}` (not in the safe-kotoba subset)"));
+        reasons.push(format!(
+            "forbidden symbol `{q}` (not in the safe-kotoba subset)"
+        ));
     }
 }
 
@@ -106,6 +108,6 @@ pub fn check(src: &str) -> Result<()> {
     if reasons.is_empty() {
         Ok(())
     } else {
-        Err(AiueError::Unsafe(reasons))
+        Err(AiueosError::Unsafe(reasons))
     }
 }

@@ -26,7 +26,7 @@ Build Phase 0 as a single Rust crate `aiueos` that depends on `kotoba-edn`
 `kototama` + `wasmtime` (compile + execute). The OS is modeled as a **graph of
 capability components**, not processes.
 
-1. **Manifests are kotoba.** `:aiue/...` EDN describes each component’s kind,
+1. **Manifests are kotoba.** `:aiueos/...` EDN describes each component’s kind,
    trust, imports, exports, effects, requirements and limits. A manifest is
    *data the OS reasons over*.
 2. **The broker is the only thing that confers capabilities**, and it audits
@@ -56,7 +56,7 @@ same capability names without reshaping the core.
 
 ## Consequences
 
-- A working `aiue` CLI today: `verify`, `inspect`, `run`, `compile`, `check`,
+- A working `aiueos` CLI today: `verify`, `inspect`, `run`, `compile`, `check`,
   `audit`. The demo system links a log service, fs service, virtio-blk driver
   and notes app; the driver’s DMA is denied without a policy that grants the
   IOMMU, and allowed with one.

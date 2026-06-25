@@ -4,7 +4,7 @@
 use std::fmt;
 
 #[derive(Debug)]
-pub enum AiueError {
+pub enum AiueosError {
     Io(std::io::Error),
     /// EDN failed to parse.
     Edn(String),
@@ -22,44 +22,44 @@ pub enum AiueError {
     Run(String),
 }
 
-pub type Result<T> = std::result::Result<T, AiueError>;
+pub type Result<T> = std::result::Result<T, AiueosError>;
 
-impl fmt::Display for AiueError {
+impl fmt::Display for AiueosError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AiueError::Io(e) => write!(f, "io error: {e}"),
-            AiueError::Edn(e) => write!(f, "edn parse error: {e}"),
-            AiueError::Schema(e) => write!(f, "schema error: {e}"),
-            AiueError::Denied(vs) => {
+            AiueosError::Io(e) => write!(f, "io error: {e}"),
+            AiueosError::Edn(e) => write!(f, "edn parse error: {e}"),
+            AiueosError::Schema(e) => write!(f, "schema error: {e}"),
+            AiueosError::Denied(vs) => {
                 writeln!(f, "policy denied ({} violation(s)):", vs.len())?;
                 for v in vs {
                     writeln!(f, "  ✗ [{}] {}: {}", v.kind.label(), v.component, v.message)?;
                 }
                 Ok(())
             }
-            AiueError::Unsafe(rs) => {
+            AiueosError::Unsafe(rs) => {
                 writeln!(f, "safe-kotoba subset rejected source ({}):", rs.len())?;
                 for r in rs {
                     writeln!(f, "  ✗ {r}")?;
                 }
                 Ok(())
             }
-            AiueError::Compile(e) => write!(f, "compile error: {e}"),
-            AiueError::Run(e) => write!(f, "run error: {e}"),
+            AiueosError::Compile(e) => write!(f, "compile error: {e}"),
+            AiueosError::Run(e) => write!(f, "run error: {e}"),
         }
     }
 }
 
-impl std::error::Error for AiueError {}
+impl std::error::Error for AiueosError {}
 
-impl From<std::io::Error> for AiueError {
+impl From<std::io::Error> for AiueosError {
     fn from(e: std::io::Error) -> Self {
-        AiueError::Io(e)
+        AiueosError::Io(e)
     }
 }
 
-impl From<kotoba_edn::ParseError> for AiueError {
+impl From<kotoba_edn::ParseError> for AiueosError {
     fn from(e: kotoba_edn::ParseError) -> Self {
-        AiueError::Edn(e.to_string())
+        AiueosError::Edn(e.to_string())
     }
 }

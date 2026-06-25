@@ -1,11 +1,11 @@
 ;; A sensor: reads hardware, publishes samples to the "scan" topic.
-{:aiue/component :driver/sensor
- :aiue/kind :driver
- :aiue/trust :untrusted
- :aiue/wasm "sensor.wat"
- :aiue/entry "tick"
- :aiue/args [21]
- :aiue/imports #{:topic/publish}
- :aiue/exports #{:topic/scan}
- :aiue/effects #{:device-io}
- :aiue/limits {:memory-pages 4 :fuel 1000000}}
+{:aiueos/component :driver/sensor
+ :aiueos/kind :driver
+ :aiueos/trust :untrusted
+ :aiueos/wasm "sensor.wat"
+ :aiueos/entry "tick"
+ :aiueos/args [21]
+ :aiueos/imports #{:topic/publish}
+ :aiueos/exports #{:topic/scan}
+ :aiueos/effects #{:device-io}
+ :aiueos/limits {:memory-pages 4 :fuel 1000000}}

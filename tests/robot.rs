@@ -14,14 +14,14 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 const SENSOR: &str = r#"(module
-  (import "aiue:host" "publish" (func $publish (param i32 i64)))
+  (import "aiueos:host" "publish" (func $publish (param i32 i64)))
   (func (export "tick") (param $v i64) (result i64)
     (call $publish (i32.const 1) (local.get $v))
     (local.get $v)))"#;
 
 const PLANNER: &str = r#"(module
-  (import "aiue:host" "poll"    (func $poll    (param i32) (result i64)))
-  (import "aiue:host" "publish" (func $publish (param i32 i64)))
+  (import "aiueos:host" "poll"    (func $poll    (param i32) (result i64)))
+  (import "aiueos:host" "publish" (func $publish (param i32 i64)))
   (func (export "tick") (param i64) (result i64)
     (local $cmd i64)
     (local.set $cmd (i64.mul (call $poll (i32.const 1)) (i64.const 2)))
@@ -29,7 +29,7 @@ const PLANNER: &str = r#"(module
     (local.get $cmd)))"#;
 
 const ACTUATOR: &str = r#"(module
-  (import "aiue:host" "poll" (func $poll (param i32) (result i64)))
+  (import "aiueos:host" "poll" (func $poll (param i32) (result i64)))
   (func (export "tick") (param i64) (result i64)
     (call $poll (i32.const 2))))"#;
 
@@ -118,16 +118,49 @@ fn poll_of_empty_topic_returns_sentinel() {
 fn boots_the_example_robot_system() {
     // End-to-end through the broker: load the on-disk robot system (WAT
     // components), boot under the default policy, actuator drives 42.
-    let sys = System::load(Path::new("examples/robot/robot.aiue.edn")).expect("loads");
+    let sys = System::load(Path::new("examples/robot/robot.aiueos.edn")).expect("loads");
     let audit = AuditLog::new(std::env::temp_dir().join("aiueos-robot-boot.edn"));
     let broker = Broker::new(Policy::default(), audit);
     let report = broker
         .boot(&sys, Path::new("examples/robot"))
         .expect("robot boots");
+    // Boot order is derived from the topic dataflow, NOT the (shuffled) listing
+    // order: sensor (publishes scan) → planner (scan→cmd) → actuator (cmd).
+    let order: Vec<&str> = report
+        .launched
+        .iter()
+        .map(|o| o.component.as_str())
+        .collect();
+    assert_eq!(
+        order,
+        vec!["driver/sensor", "agent/planner", "driver/actuator"],
+        "publisher of a topic boots before its subscriber"
+    );
     let act = report
         .launched
         .iter()
         .find(|o| o.component == "driver/actuator")
         .expect("actuator launched");
+    // If ordering were wrong, the actuator would poll an empty "cmd" topic.
     assert_eq!(act.result, Some(42), "sensor(21) → planner ×2 → actuator");
+}
+
+#[test]
+fn dangling_topic_subscription_is_denied() {
+    use aiueos::graph::CapabilityGraph;
+    use aiueos::manifest::Manifest;
+    // A subscriber that imports a named topic nobody publishes → the topic is an
+    // unresolved capability, denied before launch ("you subscribed to a topic
+    // with no publisher").
+    let sub = Manifest::parse_str(
+        "{:aiueos/component :driver/lonely :aiueos/kind :driver
+          :aiueos/imports #{:topic/subscribe :topic/ghost}}",
+    )
+    .unwrap();
+    let graph = CapabilityGraph::build(std::slice::from_ref(&sub));
+    let r = aiueos::policy::verify_component(&sub, &graph, &Policy::default());
+    let vs = r.expect_err("topic/ghost has no publisher");
+    assert!(vs
+        .iter()
+        .any(|v| v.kind == aiueos::policy::ViolationKind::UnresolvedCapability));
 }

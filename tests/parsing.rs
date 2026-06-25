@@ -3,7 +3,7 @@
 //! round-trip, and the safe-kotoba subset edge cases.
 
 use aiueos::audit::{AuditLog, Event};
-use aiueos::error::AiueError;
+use aiueos::error::AiueosError;
 use aiueos::manifest::{Kind, Manifest, Trust};
 use aiueos::policy::Policy;
 use aiueos::{edn, safe};
@@ -16,60 +16,60 @@ use aiueos::{edn, safe};
 fn manifest_non_map_is_schema_error() {
     assert!(matches!(
         Manifest::parse_str("[:not :a :map]"),
-        Err(AiueError::Schema(_))
+        Err(AiueosError::Schema(_))
     ));
 }
 
 #[test]
 fn manifest_missing_component_id_is_error() {
     assert!(matches!(
-        Manifest::parse_str("{:aiue/kind :app}"),
-        Err(AiueError::Schema(_))
+        Manifest::parse_str("{:aiueos/kind :app}"),
+        Err(AiueosError::Schema(_))
     ));
 }
 
 #[test]
 fn manifest_missing_kind_is_error() {
     assert!(matches!(
-        Manifest::parse_str("{:aiue/component :app/x}"),
-        Err(AiueError::Schema(_))
+        Manifest::parse_str("{:aiueos/component :app/x}"),
+        Err(AiueosError::Schema(_))
     ));
 }
 
 #[test]
 fn manifest_unknown_kind_is_error() {
     assert!(matches!(
-        Manifest::parse_str("{:aiue/component :x/y :aiue/kind :wizard}"),
-        Err(AiueError::Schema(_))
+        Manifest::parse_str("{:aiueos/component :x/y :aiueos/kind :wizard}"),
+        Err(AiueosError::Schema(_))
     ));
 }
 
 #[test]
 fn manifest_unknown_trust_is_error() {
     assert!(matches!(
-        Manifest::parse_str("{:aiue/component :x/y :aiue/kind :app :aiue/trust :godmode}"),
-        Err(AiueError::Schema(_))
+        Manifest::parse_str("{:aiueos/component :x/y :aiueos/kind :app :aiueos/trust :godmode}"),
+        Err(AiueosError::Schema(_))
     ));
 }
 
 #[test]
 fn manifest_bad_edn_is_parse_error() {
     assert!(matches!(
-        Manifest::parse_str("{:aiue/component"),
-        Err(AiueError::Edn(_))
+        Manifest::parse_str("{:aiueos/component"),
+        Err(AiueosError::Edn(_))
     ));
 }
 
 #[test]
 fn manifest_defaults_kernel_extension_to_trusted() {
-    let m = Manifest::parse_str("{:aiue/component :k/x :aiue/kind :kernel-extension}").unwrap();
+    let m = Manifest::parse_str("{:aiueos/component :k/x :aiueos/kind :kernel-extension}").unwrap();
     assert_eq!(m.trust, Trust::Trusted);
     assert_eq!(m.kind, Kind::KernelExtension);
 }
 
 #[test]
 fn manifest_applies_default_limits_and_entry() {
-    let m = Manifest::parse_str("{:aiue/component :app/x :aiue/kind :app}").unwrap();
+    let m = Manifest::parse_str("{:aiueos/component :app/x :aiueos/kind :app}").unwrap();
     assert_eq!(m.limits.memory_pages, 16);
     assert_eq!(m.limits.fuel, 10_000_000);
     assert_eq!(m.entry, "main");
@@ -78,11 +78,52 @@ fn manifest_applies_default_limits_and_entry() {
 }
 
 #[test]
+fn manifest_rejects_unknown_aiueos_key() {
+    // `:aiueos/effcts` is a typo for `:aiueos/effects` — silently dropping it would
+    // hide a `:dma` effect from the IOMMU gate. It must be a hard error.
+    let r = Manifest::parse_str(
+        "{:aiueos/component :driver/x :aiueos/kind :driver :aiueos/effcts #{:dma}}",
+    );
+    match r {
+        Err(AiueosError::Schema(msg)) => {
+            assert!(msg.contains("aiueos/effcts"), "names the bad key")
+        }
+        other => panic!("expected schema error, got {other:?}"),
+    }
+}
+
+#[test]
+fn manifest_accepts_all_known_keys() {
+    let m = Manifest::parse_str(
+        r#"{:aiueos/component :driver/full :aiueos/kind :driver :aiueos/trust :untrusted
+            :aiueos/source "x.clj" :aiueos/wasm "x.wasm"
+            :aiueos/imports #{:dma/map} :aiueos/exports #{:block/read}
+            :aiueos/effects #{:dma} :aiueos/requires #{:iommu}
+            :aiueos/limits {:memory-pages 8 :fuel 99} :aiueos/entry "go" :aiueos/args [1 2]
+            :aiueos/device {:bus :pci}}"#,
+    )
+    .expect("all recognized keys parse");
+    assert_eq!(m.id, "driver/full");
+    assert_eq!(m.args, vec![1, 2]);
+}
+
+#[test]
+fn manifest_ignores_non_aiueos_namespaced_keys() {
+    // Keys outside the :aiueos/ namespace (e.g. user annotations) are not policed.
+    let m = Manifest::parse_str(
+        "{:aiueos/component :app/x :aiueos/kind :app :my/note \"hello\" :doc/owner :jun}",
+    )
+    .expect("foreign-namespaced keys are allowed");
+    assert_eq!(m.id, "app/x");
+}
+
+#[test]
 fn manifest_partial_limits_keep_defaults_for_missing_keys() {
     // Only memory-pages given → fuel falls back to the default.
-    let m =
-        Manifest::parse_str("{:aiue/component :a/x :aiue/kind :app :aiue/limits {:memory-pages 4}}")
-            .unwrap();
+    let m = Manifest::parse_str(
+        "{:aiueos/component :a/x :aiueos/kind :app :aiueos/limits {:memory-pages 4}}",
+    )
+    .unwrap();
     assert_eq!(m.limits.memory_pages, 4);
     assert_eq!(m.limits.fuel, 10_000_000);
 }
@@ -97,21 +138,21 @@ fn policy(src: &str) -> Policy {
 
 #[test]
 fn policy_kernel_caps_extend_defaults() {
-    let p = policy("{:aiue/kernel-caps #{:gpu/render}}");
+    let p = policy("{:aiueos/kernel-caps #{:gpu/render}}");
     assert!(p.kernel_caps.contains("gpu/render"), "added cap present");
     assert!(p.kernel_caps.contains("log/write"), "default cap retained");
 }
 
 #[test]
 fn policy_grants_are_merged_per_component() {
-    let p = policy("{:aiue/grants {:driver/x #{:iommu :dma/map}}}");
+    let p = policy("{:aiueos/grants {:driver/x #{:iommu :dma/map}}}");
     let g = p.grants.get("driver/x").expect("grant present");
     assert!(g.contains("iommu") && g.contains("dma/map"));
 }
 
 #[test]
 fn policy_forbid_overrides_a_trust_level() {
-    let p = policy("{:aiue/forbid {:untrusted #{:network :secrets}}}");
+    let p = policy("{:aiueos/forbid {:untrusted #{:network :secrets}}}");
     let f = p.forbid_effects.get(&Trust::Untrusted).unwrap();
     assert!(f.contains("network") && f.contains("secrets"));
 }
@@ -134,14 +175,19 @@ fn audit_round_trips_entries() {
     let path = std::env::temp_dir().join("aiueos-audit-roundtrip.edn");
     let _ = std::fs::remove_file(&path);
     let log = AuditLog::new(&path);
-    log.append(Event::Grant, "app/x", "caps: log/write").unwrap();
-    log.append(Event::Deny, "driver/y", "[dma-without-iommu] no grant").unwrap();
+    log.append(Event::Grant, "app/x", "caps: log/write")
+        .unwrap();
+    log.append(Event::Deny, "driver/y", "[dma-without-iommu] no grant")
+        .unwrap();
 
     let entries = log.read().unwrap();
     assert_eq!(entries.len(), 2);
-    assert_eq!(edn::get_kw(&entries[0], "aiue", "event").as_deref(), Some("grant"));
     assert_eq!(
-        edn::get_str(&entries[1], "aiue", "component").as_deref(),
+        edn::get_kw(&entries[0], "aiueos", "event").as_deref(),
+        Some("grant")
+    );
+    assert_eq!(
+        edn::get_str(&entries[1], "aiueos", "component").as_deref(),
         Some("driver/y")
     );
     let _ = std::fs::remove_file(&path);
@@ -169,7 +215,7 @@ fn safe_rejects_dotted_host_class() {
     // Bare dotted class symbol (no `/`) — previously slipped through.
     assert!(matches!(
         safe::check("(defn f [] (java.util.ArrayList.))"),
-        Err(AiueError::Unsafe(_))
+        Err(AiueosError::Unsafe(_))
     ));
 }
 
@@ -178,7 +224,7 @@ fn safe_rejects_namespaced_host_static() {
     // `System/exit` — namespace `System`.
     assert!(matches!(
         safe::check("(defn f [] (System/exit 1))"),
-        Err(AiueError::Unsafe(_))
+        Err(AiueosError::Unsafe(_))
     ));
 }
 

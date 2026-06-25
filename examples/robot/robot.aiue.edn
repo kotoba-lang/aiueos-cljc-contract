@@ -1,5 +1,0 @@
-;; A minimal robot as a capability-component graph: sensor → planner → actuator,
-;; wired at runtime through the topic bus. Boot with the default policy:
-;;   aiue up examples/robot/robot.aiue.edn
-{:aiue/system :robot
- :aiue/components ["sensor.edn" "planner.edn" "actuator.edn"]}

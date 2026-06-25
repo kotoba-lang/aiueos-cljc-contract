@@ -1,11 +1,11 @@
 ;; The filesystem service — exports fs/* and consumes block/* from a driver.
-{:aiue/component :service/fs
- :aiue/kind :service
- :aiue/trust :verified
- :aiue/source "fs-service.clj"
- :aiue/entry "init"
- :aiue/args []
- :aiue/imports #{:block/read :block/write}
- :aiue/exports #{:fs/open :fs/read :fs/write :fs/list}
- :aiue/effects #{:storage}
- :aiue/limits {:memory-pages 32 :fuel 5000000}}
+{:aiueos/component :service/fs
+ :aiueos/kind :service
+ :aiueos/trust :verified
+ :aiueos/source "fs-service.clj"
+ :aiueos/entry "init"
+ :aiueos/args []
+ :aiueos/imports #{:block/read :block/write}
+ :aiueos/exports #{:fs/open :fs/read :fs/write :fs/list}
+ :aiueos/effects #{:storage}
+ :aiueos/limits {:memory-pages 32 :fuel 5000000}}

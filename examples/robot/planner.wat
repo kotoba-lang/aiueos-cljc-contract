@@ -2,8 +2,8 @@
 ;; topic 2 ("cmd"). Trusted as :ai-generated: may use the topic bus, but the
 ;; default policy forbids it network/secrets/persistent-write.
 (module
-  (import "aiue:host" "poll"    (func $poll    (param i32) (result i64)))
-  (import "aiue:host" "publish" (func $publish (param i32 i64)))
+  (import "aiueos:host" "poll"    (func $poll    (param i32) (result i64)))
+  (import "aiueos:host" "publish" (func $publish (param i32 i64)))
   (memory (export "memory") 1)
   (func (export "tick") (param i64) (result i64)
     (local $cmd i64)

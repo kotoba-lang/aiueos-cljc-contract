@@ -1,8 +1,0 @@
-;; aiueos system graph — the set of components that make up this running system.
-;; `aiue inspect examples/system.aiue.edn` to see the capability graph;
-;; `aiue verify examples/system.aiue.edn --policy examples/policy/default.edn`.
-{:aiue/system :demo
- :aiue/components ["components/log-service.edn"
-                   "components/fs-service.edn"
-                   "drivers/virtio-blk.edn"
-                   "apps/notes.edn"]}

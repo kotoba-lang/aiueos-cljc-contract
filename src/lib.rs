@@ -15,14 +15,14 @@
 //! already modeled so those phases slot in without reshaping the core.
 //!
 //! ## Layers
-//! - [`manifest`] — `:aiue/...` component descriptions.
+//! - [`manifest`] — `:aiueos/...` component descriptions.
 //! - [`graph`] — system graph → capability graph (who provides what).
 //! - [`policy`] — the reasoner: resolve imports, enforce effects & DMA policy.
 //! - [`broker`] — the trusted seam: verify → safe-check → compile → run, audited.
 //! - [`safe`] — the safe-kotoba subset gate.
 //! - [`audit`] — append-only EDN audit log.
 //! - [`topic`] — in-process pub/sub bus (the ROS-topic analogue).
-//! - [`host`] — broker-mediated `aiue:host` ABI: capabilities enforced at call
+//! - [`host`] — broker-mediated `aiueos:host` ABI: capabilities enforced at call
 //!   time (feature `wasm-runtime`).
 //! - [`runtime`] — kototama compile (`kototama`) + wasm execution (`wasm-runtime`).
 
@@ -41,7 +41,7 @@ pub mod host;
 #[cfg(feature = "wasm-runtime")]
 pub mod runtime;
 
-pub use error::{AiueError, Result};
+pub use error::{AiueosError, Result};
 pub use manifest::{Kind, Limits, Manifest, Trust};
 pub use policy::{Policy, Violation, ViolationKind};
 
@@ -57,15 +57,15 @@ mod tests {
     #[test]
     fn parses_a_driver_manifest() {
         let d = m(r#"
-            {:aiue/component :driver/virtio-blk
-             :aiue/kind :driver
-             :aiue/imports #{:dma/map :irq/subscribe}
-             :aiue/exports #{:block/read :block/write}
-             :aiue/effects #{:device-io :dma :interrupt}
-             :aiue/requires #{:iommu}
-             :aiue/limits {:memory-pages 32 :fuel 5000000}
-             :aiue/entry "read-block"
-             :aiue/args [7]}"#);
+            {:aiueos/component :driver/virtio-blk
+             :aiueos/kind :driver
+             :aiueos/imports #{:dma/map :irq/subscribe}
+             :aiueos/exports #{:block/read :block/write}
+             :aiueos/effects #{:device-io :dma :interrupt}
+             :aiueos/requires #{:iommu}
+             :aiueos/limits {:memory-pages 32 :fuel 5000000}
+             :aiueos/entry "read-block"
+             :aiueos/args [7]}"#);
         assert_eq!(d.id, "driver/virtio-blk");
         assert_eq!(d.kind, Kind::Driver);
         assert_eq!(d.trust, Trust::Untrusted);
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn agent_defaults_to_ai_generated_trust() {
-        let a = m(r#"{:aiue/component :agent/summarize :aiue/kind :agent}"#);
+        let a = m(r#"{:aiueos/component :agent/summarize :aiueos/kind :agent}"#);
         assert_eq!(a.trust, Trust::AiGenerated);
     }
 
@@ -86,18 +86,15 @@ mod tests {
     fn dma_requires_iommu_grant() {
         // Driver does DMA, requires iommu, but no grant → denied.
         let d = m(r#"
-            {:aiue/component :driver/x :aiue/kind :driver
-             :aiue/effects #{:dma} :aiue/requires #{:iommu}}"#);
+            {:aiueos/component :driver/x :aiueos/kind :driver
+             :aiueos/effects #{:dma} :aiueos/requires #{:iommu}}"#);
         let graph = CapabilityGraph::build(std::slice::from_ref(&d));
         let p = Policy::default();
         let r = policy::verify_component(&d, &graph, &p);
         assert!(r.is_err(), "no iommu grant should be denied");
 
         // Grant iommu → allowed.
-        let v = kotoba_edn::parse(
-            r#"{:aiue/grants {:driver/x #{:iommu}}}"#,
-        )
-        .unwrap();
+        let v = kotoba_edn::parse(r#"{:aiueos/grants {:driver/x #{:iommu}}}"#).unwrap();
         let p2 = Policy::from_edn(&v).unwrap();
         let grant = policy::verify_component(&d, &graph, &p2).expect("granted");
         assert!(grant.capabilities.contains("iommu"));
@@ -106,8 +103,8 @@ mod tests {
     #[test]
     fn ai_generated_cannot_use_network() {
         let a = m(r#"
-            {:aiue/component :agent/leaky :aiue/kind :agent
-             :aiue/effects #{:network}}"#);
+            {:aiueos/component :agent/leaky :aiueos/kind :agent
+             :aiueos/effects #{:network}}"#);
         let graph = CapabilityGraph::build(std::slice::from_ref(&a));
         let r = policy::verify_component(&a, &graph, &Policy::default());
         let vs = r.expect_err("network must be forbidden");
@@ -117,11 +114,11 @@ mod tests {
     #[test]
     fn imports_resolve_across_the_graph() {
         let fs = m(r#"
-            {:aiue/component :service/fs :aiue/kind :service
-             :aiue/exports #{:fs/open :fs/read}}"#);
+            {:aiueos/component :service/fs :aiueos/kind :service
+             :aiueos/exports #{:fs/open :fs/read}}"#);
         let app = m(r#"
-            {:aiue/component :app/notes :aiue/kind :app
-             :aiue/imports #{:fs/open :log/write}}"#);
+            {:aiueos/component :app/notes :aiueos/kind :app
+             :aiueos/imports #{:fs/open :log/write}}"#);
         let sys = System::from_manifests("demo", vec![fs, app]);
         let graph = sys.graph();
         // app imports fs/open (from fs service) and log/write (kernel cap) → ok.
@@ -132,8 +129,8 @@ mod tests {
     #[test]
     fn unresolved_import_is_denied() {
         let app = m(r#"
-            {:aiue/component :app/lonely :aiue/kind :app
-             :aiue/imports #{:gpu/render}}"#);
+            {:aiueos/component :app/lonely :aiueos/kind :app
+             :aiueos/imports #{:gpu/render}}"#);
         let graph = CapabilityGraph::build(std::slice::from_ref(&app));
         let vs = policy::verify_component(&app, &graph, &Policy::default())
             .expect_err("gpu/render has no provider");
@@ -145,16 +142,25 @@ mod tests {
     #[test]
     fn boot_order_is_dependency_respecting() {
         // app depends on fs + log; fs depends on the driver. Providers boot first.
-        let log = m(r#"{:aiue/component :service/log :aiue/kind :service :aiue/exports #{:log/write}}"#);
-        let drv = m(r#"{:aiue/component :driver/blk :aiue/kind :driver :aiue/exports #{:block/read}}"#);
-        let fs = m(r#"{:aiue/component :service/fs :aiue/kind :service
-                       :aiue/imports #{:block/read} :aiue/exports #{:fs/open}}"#);
-        let app = m(r#"{:aiue/component :app/notes :aiue/kind :app
-                        :aiue/imports #{:fs/open :log/write}}"#);
+        let log = m(
+            r#"{:aiueos/component :service/log :aiueos/kind :service :aiueos/exports #{:log/write}}"#,
+        );
+        let drv = m(
+            r#"{:aiueos/component :driver/blk :aiueos/kind :driver :aiueos/exports #{:block/read}}"#,
+        );
+        let fs = m(r#"{:aiueos/component :service/fs :aiueos/kind :service
+                       :aiueos/imports #{:block/read} :aiueos/exports #{:fs/open}}"#);
+        let app = m(r#"{:aiueos/component :app/notes :aiueos/kind :app
+                        :aiueos/imports #{:fs/open :log/write}}"#);
         // Intentionally unordered to prove the topo sort, not input order, decides.
         let sys = System::from_manifests("demo", vec![app, fs, log, drv]);
         let order = sys.boot_order().expect("acyclic");
-        let pos = |id: &str| order.iter().position(|&i| sys.components[i].id == id).unwrap();
+        let pos = |id: &str| {
+            order
+                .iter()
+                .position(|&i| sys.components[i].id == id)
+                .unwrap()
+        };
         assert!(pos("driver/blk") < pos("service/fs"));
         assert!(pos("service/fs") < pos("app/notes"));
         assert!(pos("service/log") < pos("app/notes"));
@@ -162,10 +168,10 @@ mod tests {
 
     #[test]
     fn boot_order_detects_cycle() {
-        let a = m(r#"{:aiue/component :a :aiue/kind :service
-                      :aiue/imports #{:b/x} :aiue/exports #{:a/x}}"#);
-        let b = m(r#"{:aiue/component :b :aiue/kind :service
-                      :aiue/imports #{:a/x} :aiue/exports #{:b/x}}"#);
+        let a = m(r#"{:aiueos/component :a :aiueos/kind :service
+                      :aiueos/imports #{:b/x} :aiueos/exports #{:a/x}}"#);
+        let b = m(r#"{:aiueos/component :b :aiueos/kind :service
+                      :aiueos/imports #{:a/x} :aiueos/exports #{:b/x}}"#);
         let sys = System::from_manifests("cyclic", vec![a, b]);
         let cycle = sys.boot_order().expect_err("a↔b is a cycle");
         assert_eq!(cycle.len(), 2);
@@ -176,11 +182,11 @@ mod tests {
         assert!(safe::check("(defn f [n] (+ n 1))").is_ok());
         assert!(matches!(
             safe::check("(defn f [x] (eval x))"),
-            Err(AiueError::Unsafe(_))
+            Err(AiueosError::Unsafe(_))
         ));
         assert!(matches!(
             safe::check(r#"(defn f [] (slurp "/etc/passwd"))"#),
-            Err(AiueError::Unsafe(_))
+            Err(AiueosError::Unsafe(_))
         ));
     }
 }

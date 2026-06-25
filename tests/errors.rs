@@ -1,12 +1,12 @@
-//! Coverage for `AiueError`'s `Display` rendering — the multi-violation and
+//! Coverage for `AiueosError`'s `Display` rendering — the multi-violation and
 //! multi-reason aggregation paths that the CLI relies on for its error output.
 
-use aiueos::error::AiueError;
+use aiueos::error::AiueosError;
 use aiueos::policy::{Violation, ViolationKind};
 
 #[test]
 fn denied_display_lists_every_violation() {
-    let e = AiueError::Denied(vec![
+    let e = AiueosError::Denied(vec![
         Violation {
             component: "agent/leaky".into(),
             kind: ViolationKind::ForbiddenEffect,
@@ -26,7 +26,7 @@ fn denied_display_lists_every_violation() {
 
 #[test]
 fn unsafe_display_lists_every_reason() {
-    let e = AiueError::Unsafe(vec![
+    let e = AiueosError::Unsafe(vec![
         "forbidden symbol `eval`".into(),
         "forbidden symbol `slurp`".into(),
     ]);
@@ -37,14 +37,16 @@ fn unsafe_display_lists_every_reason() {
 
 #[test]
 fn scalar_variants_render_their_kind() {
-    assert!(AiueError::Schema("bad shape".into())
+    assert!(AiueosError::Schema("bad shape".into())
         .to_string()
         .contains("schema error"));
-    assert!(AiueError::Run("trap".into()).to_string().contains("run error"));
-    assert!(AiueError::Edn("eof".into())
+    assert!(AiueosError::Run("trap".into())
+        .to_string()
+        .contains("run error"));
+    assert!(AiueosError::Edn("eof".into())
         .to_string()
         .contains("edn parse error"));
-    assert!(AiueError::Compile("nope".into())
+    assert!(AiueosError::Compile("nope".into())
         .to_string()
         .contains("compile error"));
 }
@@ -52,7 +54,7 @@ fn scalar_variants_render_their_kind() {
 #[test]
 fn io_error_converts_via_from() {
     let io = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
-    let e: AiueError = io.into();
-    assert!(matches!(e, AiueError::Io(_)));
+    let e: AiueosError = io.into();
+    assert!(matches!(e, AiueosError::Io(_)));
     assert!(e.to_string().contains("io error"));
 }

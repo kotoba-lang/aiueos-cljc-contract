@@ -1,12 +1,12 @@
 //! The system graph and the derived capability graph.
 //!
-//! A *system graph* (`system.aiue.edn`) is just a list of component manifests.
+//! A *system graph* (`system.aiueos.edn`) is just a list of component manifests.
 //! Loading it produces a [`System`]; from a system we derive a
 //! [`CapabilityGraph`] that maps each capability to the components exporting it,
 //! which the policy reasoner uses to resolve imports.
 
 use crate::edn;
-use crate::error::{AiueError, Result};
+use crate::error::{AiueosError, Result};
 use crate::manifest::Manifest;
 use kotoba_edn::EdnValue;
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,13 +18,13 @@ pub struct System {
     pub name: String,
     pub components: Vec<Manifest>,
     /// The directory each component's manifest was loaded from — its
-    /// `:aiue/source` / `:aiue/wasm` paths resolve against this, *not* the
+    /// `:aiueos/source` / `:aiueos/wasm` paths resolve against this, *not* the
     /// system file's directory. Parallel to `components`.
     pub bases: Vec<PathBuf>,
 }
 
 impl System {
-    /// Load `system.aiue.edn`. `:aiue/components` is a vector of paths relative
+    /// Load `system.aiueos.edn`. `:aiueos/components` is a vector of paths relative
     /// to the system file. A bare list of manifests (without a wrapper) is also
     /// accepted via [`System::from_manifests`].
     pub fn load(path: &Path) -> Result<System> {
@@ -32,15 +32,15 @@ impl System {
         let v = kotoba_edn::parse(&src)?;
         let base = path.parent().unwrap_or_else(|| Path::new("."));
 
-        let name = edn::get_kw(&v, "aiue", "system")
-            .or_else(|| edn::get_str(&v, "aiue", "system"))
+        let name = edn::get_kw(&v, "aiueos", "system")
+            .or_else(|| edn::get_str(&v, "aiueos", "system"))
             .unwrap_or_else(|| "system".to_string());
 
-        let comp_paths = match edn::get(&v, "aiue", "components") {
+        let comp_paths = match edn::get(&v, "aiueos", "components") {
             Some(EdnValue::Vector(xs)) | Some(EdnValue::List(xs)) => xs,
             _ => {
-                return Err(AiueError::Schema(
-                    "system graph missing :aiue/components vector".into(),
+                return Err(AiueosError::Schema(
+                    "system graph missing :aiueos/components vector".into(),
                 ))
             }
         };
@@ -50,10 +50,14 @@ impl System {
         for p in comp_paths {
             let rel = p
                 .as_string()
-                .ok_or_else(|| AiueError::Schema("component path must be a string".into()))?;
+                .ok_or_else(|| AiueosError::Schema("component path must be a string".into()))?;
             let full: PathBuf = base.join(rel);
             components.push(Manifest::load(&full)?);
-            bases.push(full.parent().unwrap_or_else(|| Path::new(".")).to_path_buf());
+            bases.push(
+                full.parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf(),
+            );
         }
         check_unique_ids(&components)?;
         Ok(System {
@@ -154,7 +158,7 @@ fn check_unique_ids(components: &[Manifest]) -> crate::error::Result<()> {
     let mut seen = BTreeSet::new();
     for c in components {
         if !seen.insert(c.id.as_str()) {
-            return Err(crate::error::AiueError::Schema(format!(
+            return Err(crate::error::AiueosError::Schema(format!(
                 "duplicate component id `{}` in system",
                 c.id
             )));
