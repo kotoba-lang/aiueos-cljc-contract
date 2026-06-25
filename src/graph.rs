@@ -60,6 +60,7 @@ impl System {
             );
         }
         check_unique_ids(&components)?;
+        check_unique_devices(&components)?;
         Ok(System {
             name,
             components,
@@ -74,6 +75,7 @@ impl System {
         components: Vec<Manifest>,
     ) -> crate::error::Result<System> {
         check_unique_ids(&components)?;
+        check_unique_devices(&components)?;
         Ok(System::from_manifests(name, components))
     }
 
@@ -162,6 +164,29 @@ fn check_unique_ids(components: &[Manifest]) -> crate::error::Result<()> {
                 "duplicate component id `{}` in system",
                 c.id
             )));
+        }
+    }
+    Ok(())
+}
+
+/// Reject a system where two components bind the *same physical device*. A device
+/// (a fully-specified `bus:vendor:device` triple) can have exactly one driver —
+/// two drivers owning the same hardware is a conflict, not a fallback.
+fn check_unique_devices(components: &[Manifest]) -> crate::error::Result<()> {
+    let mut seen: BTreeMap<(&str, &str, &str), &str> = BTreeMap::new();
+    for c in components {
+        if let Some(d) = &c.device {
+            // Only fully-specified bindings can conflict; a partial one (e.g. just
+            // a bus) is too ambiguous to claim exclusive ownership.
+            if let (Some(bus), Some(vendor), Some(dev)) = (&d.bus, &d.vendor, &d.device) {
+                let key = (bus.as_str(), vendor.as_str(), dev.as_str());
+                if let Some(prev) = seen.insert(key, c.id.as_str()) {
+                    return Err(crate::error::AiueosError::Schema(format!(
+                        "device {bus}:{vendor}:{dev} is bound by both `{prev}` and `{}`",
+                        c.id
+                    )));
+                }
+            }
         }
     }
     Ok(())

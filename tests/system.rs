@@ -94,6 +94,39 @@ fn unique_component_ids_pass_validation() {
     assert!(System::try_from_manifests("s", vec![a, b]).is_ok());
 }
 
+#[test]
+fn two_drivers_binding_the_same_device_are_rejected() {
+    let dev = r#":aiueos/device {:bus :pci :vendor "0x1af4" :device "0x1001"}"#;
+    let a = m(&format!(
+        "{{:aiueos/component :driver/a :aiueos/kind :driver {dev}}}"
+    ));
+    let b = m(&format!(
+        "{{:aiueos/component :driver/b :aiueos/kind :driver {dev}}}"
+    ));
+    assert!(matches!(
+        System::try_from_manifests("s", vec![a, b]),
+        Err(AiueosError::Schema(_))
+    ));
+}
+
+#[test]
+fn drivers_binding_distinct_devices_pass() {
+    let a = m(r#"{:aiueos/component :driver/a :aiueos/kind :driver
+                  :aiueos/device {:bus :pci :vendor "0x1af4" :device "0x1001"}}"#);
+    let b = m(r#"{:aiueos/component :driver/b :aiueos/kind :driver
+                  :aiueos/device {:bus :pci :vendor "0x1af4" :device "0x1000"}}"#);
+    assert!(System::try_from_manifests("s", vec![a, b]).is_ok());
+}
+
+#[test]
+fn partial_device_bindings_do_not_conflict() {
+    // Two drivers that only name a bus (no vendor/device) don't claim exclusive
+    // ownership, so they don't conflict.
+    let a = m("{:aiueos/component :driver/a :aiueos/kind :driver :aiueos/device {:bus :pci}}");
+    let b = m("{:aiueos/component :driver/b :aiueos/kind :driver :aiueos/device {:bus :pci}}");
+    assert!(System::try_from_manifests("s", vec![a, b]).is_ok());
+}
+
 // ---------------------------------------------------------------------------
 // capability graph
 // ---------------------------------------------------------------------------
