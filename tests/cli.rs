@@ -281,6 +281,28 @@ fn up_edn_emits_machine_readable_boot_report() {
 
 #[cfg(feature = "wasm-runtime")]
 #[test]
+fn run_edn_emits_machine_readable_result() {
+    let (code, out, _e) = aiueos(&[
+        "run",
+        "examples/robot/sensor.edn",
+        "--system",
+        "examples/robot/robot.aiueos.edn",
+        "--edn",
+    ]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("run result is valid EDN");
+    assert_eq!(
+        aiueos::edn::get(&v, "aiueos", "result").and_then(|x| x.as_integer()),
+        Some(21)
+    );
+    assert_eq!(
+        aiueos::edn::get(&v, "aiueos", "component").and_then(|x| x.as_string()),
+        Some("driver/sensor")
+    );
+}
+
+#[cfg(feature = "wasm-runtime")]
+#[test]
 fn run_a_host_importing_component() {
     let (code, out, _e) = aiueos(&[
         "run",

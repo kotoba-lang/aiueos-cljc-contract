@@ -2,7 +2,7 @@
 //!
 //!   aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]   capability + policy check
 //!   aiueos inspect <system>.edn          [--policy p.edn] [--edn]   print the capability graph
-//!   aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn]
+//!   aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]
 //!   aiueos compile <source.clj|manifest> [-o out.wasm]      CLJ/Kotoba → wasm
 //!   aiueos check   <source.clj>                             safe-kotoba subset gate
 //!   aiueos audit   [--log <audit.edn>]                      replay the audit log
@@ -53,7 +53,7 @@ fn print_usage() {
          aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]\n  \
          aiueos inspect <system>.edn          [--policy p.edn] [--edn]\n  \
          aiueos up      <system>.edn          [--policy p.edn] [--edn]   boot the whole system\n  \
-         aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn]\n  \
+         aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]\n  \
          aiueos compile <source.clj|manifest> [-o out.wasm]\n  \
          aiueos check   <source.clj>\n  \
          aiueos audit   [--log <audit.edn>]"
@@ -351,8 +351,24 @@ fn cmd_run(args: &[String]) -> aiueos::Result<()> {
         };
 
         let result = broker.launch(&m, &base, &graph)?;
-        println!("✓ {} :: {}({:?}) = {}", m.id, m.entry, m.args, result);
-        println!("  audit: {}", broker.audit.path().display());
+        if args.iter().any(|a| a == "--edn") {
+            use kotoba_edn::EdnValue as E;
+            println!(
+                "{}",
+                kotoba_edn::to_string(&E::map([
+                    (E::kw("aiueos", "component"), E::string(m.id.clone())),
+                    (E::kw("aiueos", "entry"), E::string(m.entry.clone())),
+                    (
+                        E::kw("aiueos", "args"),
+                        E::vector(m.args.iter().map(|a| E::int(*a))),
+                    ),
+                    (E::kw("aiueos", "result"), E::int(result)),
+                ]))
+            );
+        } else {
+            println!("✓ {} :: {}({:?}) = {}", m.id, m.entry, m.args, result);
+            println!("  audit: {}", broker.audit.path().display());
+        }
         Ok(())
     }
 }
