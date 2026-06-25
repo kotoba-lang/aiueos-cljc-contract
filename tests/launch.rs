@@ -157,6 +157,28 @@ fn a_runtime_trap_is_audited_as_reject() {
 }
 
 #[test]
+fn launch_denies_an_unresolved_import() {
+    // The component imports :fs/open — not a kernel cap, and with no provider in
+    // its single-component graph it's unresolved → launch denies before running.
+    let dir = tmpdir();
+    std::fs::write(
+        dir.join("needsfs.wat"),
+        r#"(module (func (export "tick") (result i64) (i64.const 0)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("needsfs.edn"),
+        r#"{:aiueos/component :app/needsfs :aiueos/kind :app
+            :aiueos/wasm "needsfs.wat" :aiueos/entry "tick" :aiueos/imports #{:fs/open}}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        launch_in(&dir, "needsfs.edn"),
+        Err(AiueosError::Denied(_))
+    ));
+}
+
+#[test]
 fn malformed_wasm_is_a_clean_run_error() {
     let dir = tmpdir();
     std::fs::write(dir.join("garbage.wat"), "this is not wasm or wat (((").unwrap();
