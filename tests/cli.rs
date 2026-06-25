@@ -272,6 +272,27 @@ fn inspect_renders_policy_violations() {
 
 #[cfg(feature = "wasm-runtime")]
 #[test]
+fn hash_prints_sha256_matching_the_library() {
+    let p = write("hashme.wat", "(module)");
+    let want = aiueos::runtime::sha256_hex(b"(module)");
+    let (code, out, _e) = aiueos(&["hash", p.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert!(
+        out.contains(&want),
+        "prints the sha256 the broker will check against"
+    );
+    // --edn form is parseable and carries the same digest
+    let (code, out, _e) = aiueos(&["hash", p.to_str().unwrap(), "--edn"]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("valid EDN");
+    assert_eq!(
+        aiueos::edn::get(&v, "aiueos", "sha256").and_then(|x| x.as_string()),
+        Some(want.as_str())
+    );
+}
+
+#[cfg(feature = "wasm-runtime")]
+#[test]
 fn up_boots_the_robot_system() {
     let (code, out, _e) = aiueos(&["up", "examples/robot/robot.aiueos.edn"]);
     assert_eq!(code, 0, "robot boots with the default policy");

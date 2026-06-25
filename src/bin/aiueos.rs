@@ -5,6 +5,7 @@
 //!   aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]
 //!   aiueos compile <source.clj|manifest> [-o out.wasm]      CLJ/Kotoba → wasm
 //!   aiueos check   <source.clj>                             safe-kotoba subset gate
+//!   aiueos hash    <file> [--edn]                           sha256 for :aiueos/wasm-sha256
 //!   aiueos audit   [--log <audit.edn>]                      replay the audit log
 
 use aiueos::audit::AuditLog;
@@ -26,6 +27,7 @@ fn main() -> ExitCode {
         "run" => cmd_run(rest),
         "compile" => cmd_compile(rest),
         "check" => cmd_check(rest),
+        "hash" => cmd_hash(rest),
         "audit" => cmd_audit(rest),
         "" | "-h" | "--help" | "help" => {
             print_usage();
@@ -85,6 +87,7 @@ fn print_usage() {
          aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]\n  \
          aiueos compile <source.clj|manifest> [-o out.wasm]\n  \
          aiueos check   <source.clj>\n  \
+         aiueos hash    <file> [--edn]\n  \
          aiueos audit   [--log <audit.edn>]"
     );
 }
@@ -535,6 +538,34 @@ fn cmd_check(args: &[String]) -> aiueos::Result<()> {
     aiueos::safe::check(&src)?;
     println!("✓ {target} is within the safe-kotoba subset");
     Ok(())
+}
+
+fn cmd_hash(args: &[String]) -> aiueos::Result<()> {
+    #[cfg(not(feature = "wasm-runtime"))]
+    {
+        let _ = args;
+        return Err(run_err("built without `wasm-runtime` feature"));
+    }
+    #[cfg(feature = "wasm-runtime")]
+    {
+        let target = positional(args).ok_or_else(|| schema("hash needs a file"))?;
+        let bytes = std::fs::read(target)?;
+        let hex = aiueos::runtime::sha256_hex(&bytes);
+        if args.iter().any(|a| a == "--edn") {
+            use kotoba_edn::EdnValue as E;
+            println!(
+                "{}",
+                kotoba_edn::to_string(&E::map([
+                    (E::kw("aiueos", "path"), E::string(target.clone())),
+                    (E::kw("aiueos", "sha256"), E::string(hex)),
+                ]))
+            );
+        } else {
+            // `<hex>  <path>` — paste the hex into the manifest's :aiueos/wasm-sha256.
+            println!("{hex}  {target}");
+        }
+        Ok(())
+    }
 }
 
 fn cmd_audit(args: &[String]) -> aiueos::Result<()> {
