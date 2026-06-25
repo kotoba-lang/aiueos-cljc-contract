@@ -163,6 +163,22 @@ fn inspect_prints_the_capability_graph() {
 }
 
 #[test]
+fn inspect_empty_graph_reports_no_capabilities() {
+    // A system whose components export nothing → the capability graph is empty.
+    write(
+        "noexports.edn",
+        "{:aiueos/component :app/q :aiueos/kind :app}",
+    );
+    let sys = write(
+        "emptysys.aiueos.edn",
+        r#"{:aiueos/system :empty :aiueos/components ["noexports.edn"]}"#,
+    );
+    let (code, out, _e) = aiueos(&["inspect", sys.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert!(out.contains("no exported capabilities"));
+}
+
+#[test]
 fn inspect_renders_policy_violations() {
     // No --policy → default policy grants no IOMMU → the driver's DMA is denied.
     // inspect reports (it doesn't gate), so it still exits 0 but shows the ✗ line.

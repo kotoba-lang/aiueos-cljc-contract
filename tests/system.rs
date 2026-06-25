@@ -140,3 +140,43 @@ fn broker_audits_grant_and_deny() {
     assert!(events.contains(&"deny".to_string()), "deny audited");
     let _ = std::fs::remove_file(&path);
 }
+
+// ---------------------------------------------------------------------------
+// Policy::load — on-disk policy parsing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn policy_load_reads_grants_from_file() {
+    let p = tmp("policyload").join("pol.edn");
+    std::fs::write(&p, "{:aiueos/grants {:driver/x #{:iommu}}}").unwrap();
+    let pol = Policy::load(&p).expect("policy loads");
+    assert!(pol.grants.get("driver/x").unwrap().contains("iommu"));
+}
+
+#[test]
+fn policy_load_malformed_is_edn_error() {
+    let p = tmp("policybad").join("pol.edn");
+    std::fs::write(&p, "{:aiueos/grants #{").unwrap();
+    assert!(matches!(Policy::load(&p), Err(AiueosError::Edn(_))));
+}
+
+#[test]
+fn policy_load_missing_file_is_io_error() {
+    let p = tmp("policymissing").join("nope.edn");
+    let _ = std::fs::remove_file(&p);
+    assert!(matches!(Policy::load(&p), Err(AiueosError::Io(_))));
+}
+
+// ---------------------------------------------------------------------------
+// audit: a corrupt log line is surfaced, not silently skipped
+// ---------------------------------------------------------------------------
+
+#[test]
+fn audit_read_rejects_a_garbage_line() {
+    let p = tmp("auditgarbage").join("audit.edn");
+    std::fs::write(&p, "{:aiueos/event :grant}\nnot valid edn {{{\n").unwrap();
+    assert!(
+        AuditLog::new(&p).read().is_err(),
+        "a corrupt audit line must surface as an error"
+    );
+}
