@@ -173,12 +173,30 @@ $BIN inspect examples/system.aiueos.edn --edn
 ```text
 aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]   capability + policy check
 aiueos inspect <system>.edn          [--policy p.edn] [--edn]   print the capability graph
-aiueos up      <system>.edn          [--policy p.edn]   boot the whole system (Stage 0–4)
-aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn]
+aiueos up      <system>.edn          [--policy p.edn] [--edn]   boot the whole system (Stage 0–4)
+aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]
 aiueos compile <source.clj|manifest> [-o out.wasm]      CLJ/Kotoba → wasm
 aiueos check   <source.clj>                             safe-kotoba subset gate
+aiueos hash    <file> [--edn]                           sha256 for :aiueos/wasm-sha256
 aiueos audit   [--log <audit.edn>]                      replay the audit log
 ```
+
+All four inspection/execution commands (`verify`/`inspect`/`up`/`run`) accept
+`--edn` for machine-readable output — success verdicts, denials, *and* structural
+errors are emitted as EDN, so an AI agent can drive the whole lifecycle as data.
+
+### Supply-chain integrity
+
+A precompiled/WAT component can pin its artifact's hash; the broker refuses to run
+bytes that don't match (tamper detection):
+
+```bash
+$BIN hash mydriver.wasm            # → <sha256>  mydriver.wasm
+# in the manifest:  :aiueos/wasm "mydriver.wasm"  :aiueos/wasm-sha256 "<sha256>"
+```
+
+This is *integrity*, not *authenticity* — signed manifests / provenance are a
+later phase (see [`SECURITY.md`](SECURITY.md)).
 
 ## Example: a virtio-blk driver
 

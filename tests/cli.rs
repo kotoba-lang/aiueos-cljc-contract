@@ -293,6 +293,13 @@ fn hash_prints_sha256_matching_the_library() {
 
 #[cfg(feature = "wasm-runtime")]
 #[test]
+fn hash_missing_file_errors() {
+    let (code, _o, _e) = aiueos(&["hash", "/no/such/artifact.wasm"]);
+    assert_eq!(code, 1);
+}
+
+#[cfg(feature = "wasm-runtime")]
+#[test]
 fn up_boots_the_robot_system() {
     let (code, out, _e) = aiueos(&["up", "examples/robot/robot.aiueos.edn"]);
     assert_eq!(code, 0, "robot boots with the default policy");
