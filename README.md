@@ -223,17 +223,21 @@ Capabilities aren't just a static manifest claim — the broker-mediated
 function only if its conferred capability set contains the matching capability;
 a call without it **traps**.
 
-| import              | capability        | meaning                       |
-|---------------------|-------------------|-------------------------------|
-| `log(i64)`          | `log/write`       | emit a log sample             |
-| `clock() -> i64`    | `clock/monotonic` | monotonic tick                |
-| `publish(i32,i64)`  | `topic/publish`   | publish a sample to a topic   |
-| `poll(i32) -> i64`  | `topic/subscribe` | latest sample on a topic       |
+| import              | capability        | meaning                          |
+|---------------------|-------------------|----------------------------------|
+| `log(i64)`          | `log/write`       | emit a log sample                |
+| `clock() -> i64`    | `clock/monotonic` | monotonic tick                   |
+| `publish(i32,i64)`  | `topic/publish`   | publish a sample to a topic      |
+| `poll(i32) -> i64`  | `topic/subscribe` | latest sample (peek)             |
+| `take(i32) -> i64`  | `topic/subscribe` | pop oldest unread sample (FIFO)  |
+| `count(i32) -> i64` | `topic/subscribe` | #samples published to a topic    |
 
 The [`topic`](src/topic.rs) bus is the ROS-topic analogue (numeric topic ids,
-i64 samples, last-write-wins). On `boot`, one bus is threaded through every
-component, so a producer's `publish` is visible to a later consumer's `poll` —
-a running sensor → planner → actuator dataflow over capability-gated nodes:
+i64 samples). It keeps both the latest value (`poll`, peek) and a per-topic FIFO
+of unread samples (`take`, drain) — so a slow consumer can read *every* reading,
+not just the newest. On `boot`, one bus is threaded through every component, so a
+producer's `publish` is visible to a later consumer's `poll`/`take` — a running
+sensor → planner → actuator dataflow over capability-gated nodes:
 
 ```bash
 $BIN up examples/robot/robot.aiueos.edn
@@ -243,6 +247,13 @@ $BIN up examples/robot/robot.aiueos.edn
 #    ✓ agent/planner    (agent)  → 42     # polls scan, publishes scan×2 to "cmd"
 #    ✓ driver/actuator  (driver) → 42     # polls cmd, drives it
 #  ✓ system up — 3/3 components launched
+```
+
+Run it as a **periodic control loop** with `--rounds N` — one bus is threaded
+across all rounds, so samples accumulate and a consumer drains them each cycle:
+
+```bash
+$BIN up examples/robot/robot.aiueos.edn --rounds 10   # 10 control cycles
 ```
 
 The planner is an `:agent` (AI-generated trust): it may use the topic bus, but

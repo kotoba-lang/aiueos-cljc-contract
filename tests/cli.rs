@@ -310,6 +310,24 @@ fn up_boots_the_robot_system() {
 
 #[cfg(feature = "wasm-runtime")]
 #[test]
+fn up_rounds_runs_n_cycles() {
+    let (code, out, _e) = aiueos(&[
+        "up",
+        "examples/robot/robot.aiueos.edn",
+        "--rounds",
+        "2",
+        "--edn",
+    ]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("valid EDN");
+    // multi-round → :aiueos/rounds is a vector of 2 rounds; :aiueos/launched kept.
+    let rounds = aiueos::edn::get(&v, "aiueos", "rounds").expect("rounds present");
+    assert_eq!(rounds.as_vector().map(|r| r.len()), Some(2));
+    assert!(aiueos::edn::get(&v, "aiueos", "launched").is_some());
+}
+
+#[cfg(feature = "wasm-runtime")]
+#[test]
 fn up_edn_emits_machine_readable_boot_report() {
     let (code, out, _e) = aiueos(&["up", "examples/robot/robot.aiueos.edn", "--edn"]);
     assert_eq!(code, 0);
