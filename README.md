@@ -108,6 +108,19 @@ build it with `--no-default-features` for a fast manifest/policy/graph engine.
   `:requires #{:iommu}` *and* be granted `:iommu`; otherwise *dma-without-iommu*.
   (A Wasm driver’s whole point is to be evicted from the TCB — DMA is the one
   thing that can still escape the sandbox, so the IOMMU gate is mandatory.)
+- **Device exclusivity** — a fully-specified `bus:vendor:device` binding can have
+  exactly one driver; two drivers claiming the same hardware is rejected.
+
+### Fail loud, never silently degrade
+
+Manifests are validated strictly at parse time — a malformed field is a hard
+error, never a silent default. This matters most for security-relevant fields: a
+typo'd `:aiueos/effcts` can't quietly drop a `:dma` effect (and slip past the
+IOMMU gate), a negative `:memory-pages` can't wrap to a huge limit, and
+non-integer `:aiueos/args` can't reach the entry as the wrong arguments. Unknown
+`:aiueos/*` keys, out-of-range limits, non-integer args, an empty `:aiueos/entry`,
+unknown `:aiueos/kind`/`:aiueos/trust`, and duplicate component ids are all
+rejected.
 
 ## CLI
 
@@ -143,6 +156,13 @@ $BIN check examples/apps/notes.clj
 
 # replay the audit log
 $BIN audit --log examples/robot/.aiueos/audit.edn
+
+# machine-readable verdict for tooling / AI agents (EDN, exit code = pass/fail):
+$BIN verify examples/system.aiueos.edn --policy examples/policy/default.edn --edn
+#  {:aiueos/grants {"app/notes" #{"fs/open" "log/write"} ...} :aiueos/verified true}
+$BIN inspect examples/system.aiueos.edn --edn
+#  {:aiueos/system "demo" :aiueos/components [...] :aiueos/graph {...}
+#   :aiueos/verdicts [{:component "..." :verified true :caps #{...}} ...]}
 ```
 
 > The CLJ example system (`examples/system.aiueos.edn`, with `.clj` components)
@@ -151,8 +171,8 @@ $BIN audit --log examples/robot/.aiueos/audit.edn
 > robot system above is pure WAT and needs nothing but the default build.
 
 ```text
-aiueos verify  <manifest|system>.edn [--policy p.edn]   capability + policy check
-aiueos inspect <system>.edn          [--policy p.edn]   print the capability graph
+aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]   capability + policy check
+aiueos inspect <system>.edn          [--policy p.edn] [--edn]   print the capability graph
 aiueos up      <system>.edn          [--policy p.edn]   boot the whole system (Stage 0–4)
 aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn]
 aiueos compile <source.clj|manifest> [-o out.wasm]      CLJ/Kotoba → wasm
