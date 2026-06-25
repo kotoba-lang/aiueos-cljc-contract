@@ -230,7 +230,7 @@ impl Broker {
             publish: m.publishes.clone(),
             subscribe: m.subscribes.clone(),
         };
-        let outcome = crate::host::run_with_host_restricted(
+        let outcome = match crate::host::run_with_host_restricted(
             &wasm,
             &m.entry,
             &m.args,
@@ -239,7 +239,19 @@ impl Broker {
             caps,
             bus,
             &topics,
-        )?;
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                // A runtime trap (fuel/memory exhaustion, an undeclared-topic or
+                // ungranted-capability host call, `unreachable`) is security-relevant
+                // — record it before surfacing. Don't let an audit IO error mask the
+                // original run error.
+                let _ = self
+                    .audit
+                    .append(Event::Reject, &m.id, &format!("run failed: {e}"));
+                return Err(e);
+            }
+        };
         self.audit.append(
             Event::Run,
             &m.id,

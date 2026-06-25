@@ -125,6 +125,38 @@ fn wasm_sha256_matches_runs_and_mismatch_is_rejected() {
 }
 
 #[test]
+fn a_runtime_trap_is_audited_as_reject() {
+    let dir = tmpdir();
+    let logpath = dir.join("trap-audit.edn");
+    let _ = std::fs::remove_file(&logpath);
+    std::fs::write(
+        dir.join("trap.wat"),
+        r#"(module (func (export "tick") (result i64) (unreachable)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("trap.edn"),
+        r#"{:aiueos/component :app/trap :aiueos/kind :app :aiueos/wasm "trap.wat" :aiueos/entry "tick"}"#,
+    )
+    .unwrap();
+    let m = Manifest::load(&dir.join("trap.edn")).unwrap();
+    let g = CapabilityGraph::build(std::slice::from_ref(&m));
+    let broker = Broker::new(Policy::default(), AuditLog::new(&logpath));
+    assert!(broker.launch(&m, &dir, &g).is_err(), "unreachable traps");
+
+    let entries = AuditLog::new(&logpath).read().unwrap();
+    let has_reject = entries.iter().any(|e| {
+        aiueos::edn::get(e, "aiueos", "event")
+            .and_then(|v| v.as_keyword().map(|k| k.name().to_string()))
+            == Some("reject".to_string())
+    });
+    assert!(
+        has_reject,
+        "a runtime trap must leave a reject in the audit log"
+    );
+}
+
+#[test]
 fn malformed_wasm_is_a_clean_run_error() {
     let dir = tmpdir();
     std::fs::write(dir.join("garbage.wat"), "this is not wasm or wat (((").unwrap();
