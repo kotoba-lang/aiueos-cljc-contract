@@ -139,6 +139,27 @@ mod tests {
     }
 
     #[test]
+    fn untrusted_forbids_secrets_but_not_network() {
+        // The :untrusted tier (default for a plain app) forbids :secrets — but,
+        // unlike :ai-generated, NOT :network. Tests the tier distinction.
+        let secret = m(r#"{:aiueos/component :app/s :aiueos/kind :app
+                          :aiueos/effects #{:secrets}}"#);
+        let g = CapabilityGraph::build(std::slice::from_ref(&secret));
+        assert!(
+            policy::verify_component(&secret, &g, &Policy::default()).is_err(),
+            "untrusted :secrets is denied"
+        );
+
+        let net = m(r#"{:aiueos/component :app/n :aiueos/kind :app
+                       :aiueos/effects #{:network}}"#);
+        let g2 = CapabilityGraph::build(std::slice::from_ref(&net));
+        assert!(
+            policy::verify_component(&net, &g2, &Policy::default()).is_ok(),
+            "untrusted :network is allowed (only :ai-generated forbids it)"
+        );
+    }
+
+    #[test]
     fn imports_resolve_across_the_graph() {
         let fs = m(r#"
             {:aiueos/component :service/fs :aiueos/kind :service
