@@ -341,6 +341,27 @@ fn inspect_on_a_single_manifest_gives_a_helpful_error() {
 }
 
 #[test]
+fn inspect_edn_includes_per_topic_isolation() {
+    // The robot components declare/derive publishes/subscribes — inspect --edn
+    // should expose them so an agent sees the topic confinement.
+    let (code, out, _e) = aiueos(&["inspect", "examples/robot/robot.aiueos.edn", "--edn"]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("valid EDN");
+    let comps = aiueos::edn::get(&v, "aiueos", "components")
+        .and_then(|x| x.as_vector())
+        .expect("components vector");
+    // component fields are bare keywords (:id, :publishes, …)
+    let sensor = comps
+        .iter()
+        .find(|c| {
+            aiueos::edn::get_bare(c, "id").and_then(|x| x.as_string()) == Some("driver/sensor")
+        })
+        .expect("sensor present");
+    // sensor publishes to topic 1 (derived from its :topic/scan export)
+    assert!(aiueos::edn::get_bare(sensor, "publishes").is_some());
+}
+
+#[test]
 fn inspect_dot_emits_a_graphviz_digraph() {
     let (code, out, _e) = aiueos(&["inspect", "examples/system.aiueos.edn", "--dot"]);
     assert_eq!(code, 0);

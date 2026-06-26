@@ -364,6 +364,20 @@ fn inspect_edn(sys: &System, graph: &CapabilityGraph, policy: &Policy) -> String
             );
             fields.push((E::kw_bare("device"), dev));
         }
+        // Per-topic isolation (when declared/derived) so an agent sees the
+        // topic confinement, not just the coarse capabilities.
+        if let Some(p) = &c.publishes {
+            fields.push((
+                E::kw_bare("publishes"),
+                E::set(p.iter().map(|i| E::int(*i as i64))),
+            ));
+        }
+        if let Some(s) = &c.subscribes {
+            fields.push((
+                E::kw_bare("subscribes"),
+                E::set(s.iter().map(|i| E::int(*i as i64))),
+            ));
+        }
         E::map(fields)
     }));
 
