@@ -264,6 +264,8 @@ a call without it **traps**.
 A component imports the host functions it needs and is described by a manifest
 that grants the matching capabilities (here a noisy sensor):
 
+(This is a runnable example — see [`examples/authoring/`](examples/authoring).)
+
 ```wat
 ;; sensor.wat — import only what you call
 (module
@@ -271,8 +273,8 @@ that grants the matching capabilities (here a noisy sensor):
   (import "aiueos:host" "random"  (func $random  (result i64)))
   (func (export "tick") (result i64)
     (local $r i64)
-    (local.set $r (i64.rem_s (call $random) (i64.const 100)))  ;; reading 0..99
-    (call $publish (i32.const 1) (local.get $r))               ;; → topic 1 ("scan")
+    (local.set $r (call $random))                ;; a (deterministic) reading
+    (call $publish (i32.const 1) (local.get $r)) ;; → topic 1 ("scan")
     (local.get $r)))
 ```
 ```edn

@@ -57,6 +57,20 @@ fn source_component_without_kototama_is_a_clear_error() {
 }
 
 #[test]
+fn the_authoring_example_actually_launches() {
+    // The README "authoring a component" snippet is a real, runnable example —
+    // keep it verified so the docs can't drift.
+    let m = Manifest::load(Path::new("examples/authoring/sensor.edn")).expect("loads");
+    let g = CapabilityGraph::build(std::slice::from_ref(&m));
+    assert!(
+        broker()
+            .launch(&m, Path::new("examples/authoring"), &g)
+            .is_ok(),
+        "the documented authoring example must launch"
+    );
+}
+
+#[test]
 fn launch_runs_a_host_importing_component_with_a_fresh_bus() {
     // The example sensor imports :topic/publish (a kernel cap) → its grant lets
     // the publish through; launch runs it on a fresh bus and returns the reading.
