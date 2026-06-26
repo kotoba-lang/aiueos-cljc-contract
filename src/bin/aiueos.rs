@@ -497,6 +497,14 @@ fn cmd_up(args: &[String]) -> aiueos::Result<()> {
     {
         let target = positional(args).ok_or_else(|| schema("up needs a system file"))?;
         let path = PathBuf::from(target);
+        // A single manifest passed by mistake → point at `run`, not a cryptic
+        // missing-:aiueos/components error.
+        if path.exists() && !is_system(&path) {
+            return Err(schema(&format!(
+                "{target}: up needs a system graph (:aiueos/components); \
+                 use `run` for a single component manifest"
+            )));
+        }
         let base = path
             .parent()
             .unwrap_or_else(|| Path::new("."))

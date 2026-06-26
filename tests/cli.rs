@@ -431,6 +431,18 @@ fn hash_missing_file_errors() {
 
 #[cfg(feature = "wasm-runtime")]
 #[test]
+fn up_on_a_single_manifest_gives_a_helpful_error() {
+    let p = write(
+        "single-for-up.edn",
+        "{:aiueos/component :app/x :aiueos/kind :app}",
+    );
+    let (code, _out, err) = aiueos(&["up", p.to_str().unwrap()]);
+    assert_eq!(code, 1);
+    assert!(err.contains("system graph") && err.contains("run"));
+}
+
+#[cfg(feature = "wasm-runtime")]
+#[test]
 fn up_dry_run_verifies_without_launching() {
     let (code, out, _e) = aiueos(&["up", "examples/robot/robot.aiueos.edn", "--dry-run"]);
     assert_eq!(code, 0);
