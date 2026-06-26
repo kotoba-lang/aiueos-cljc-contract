@@ -25,6 +25,23 @@ fn denied_display_lists_every_violation() {
 }
 
 #[test]
+fn every_violation_kind_has_a_distinct_nonempty_label() {
+    // Pins each ViolationKind → label mapping (incl. dma-without-iommu and the
+    // signing bad-signature) so a new/renamed variant can't collide or blank out.
+    use std::collections::BTreeSet;
+    let kinds = [
+        ViolationKind::UnresolvedCapability,
+        ViolationKind::ForbiddenEffect,
+        ViolationKind::DmaWithoutIommu,
+        ViolationKind::BadSignature,
+    ];
+    let labels: BTreeSet<&str> = kinds.iter().map(|k| k.label()).collect();
+    assert_eq!(labels.len(), kinds.len(), "labels are distinct");
+    assert!(labels.iter().all(|l| !l.is_empty()), "no blank label");
+    assert!(labels.contains("dma-without-iommu") && labels.contains("bad-signature"));
+}
+
+#[test]
 fn unsafe_display_lists_every_reason() {
     let e = AiueosError::Unsafe(vec![
         "forbidden symbol `eval`".into(),
