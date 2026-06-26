@@ -431,6 +431,30 @@ fn hash_missing_file_errors() {
 
 #[cfg(feature = "wasm-runtime")]
 #[test]
+fn up_dry_run_verifies_without_launching() {
+    let (code, out, _e) = aiueos(&["up", "examples/robot/robot.aiueos.edn", "--dry-run"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("dry-run"));
+    // nothing is launched, so no component result lines
+    assert!(!out.contains("→ 21"), "no component is actually executed");
+
+    // --edn form
+    let (code, out, _e) = aiueos(&[
+        "up",
+        "examples/robot/robot.aiueos.edn",
+        "--dry-run",
+        "--edn",
+    ]);
+    assert_eq!(code, 0);
+    let v = kotoba_edn::parse(out.trim()).expect("valid EDN");
+    assert_eq!(
+        aiueos::edn::get(&v, "aiueos", "dry-run").and_then(|x| x.as_bool()),
+        Some(true)
+    );
+}
+
+#[cfg(feature = "wasm-runtime")]
+#[test]
 fn up_boots_the_robot_system() {
     let (code, out, _e) = aiueos(&["up", "examples/robot/robot.aiueos.edn"]);
     assert_eq!(code, 0, "robot boots with the default policy");

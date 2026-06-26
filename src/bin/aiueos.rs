@@ -83,7 +83,7 @@ fn print_usage() {
          USAGE:\n  \
          aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]\n  \
          aiueos inspect <system>.edn          [--policy p.edn] [--edn]\n  \
-         aiueos up      <system>.edn          [--policy p.edn] [--edn] [--rounds N]   boot the whole system\n  \
+         aiueos up      <system>.edn          [--policy p.edn] [--edn] [--rounds N] [--dry-run]   boot the whole system\n  \
          aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]\n  \
          aiueos compile <source.clj|manifest> [-o out.wasm]\n  \
          aiueos check   <source.clj>\n  \
@@ -527,6 +527,30 @@ fn cmd_up(args: &[String]) -> aiueos::Result<()> {
                     return Err(schema(&format!("dependency cycle: {}", cycle.join(" → "))));
                 }
             }
+        }
+
+        // --dry-run: link + verify only (Stages 1–3), launch nothing. Validates a
+        // system with no side effects — fast, no wasm executed.
+        if args.iter().any(|a| a == "--dry-run") {
+            let grants = broker.verify_system(&sys)?;
+            if !edn_mode {
+                println!(
+                    "✓ dry-run: system `{}` verified — {} component(s) would launch",
+                    sys.name,
+                    grants.len()
+                );
+            } else {
+                use kotoba_edn::EdnValue as E;
+                println!(
+                    "{}",
+                    kotoba_edn::to_string(&E::map([
+                        (E::kw("aiueos", "system"), E::string(sys.name.clone())),
+                        (E::kw("aiueos", "dry-run"), E::bool(true)),
+                        (E::kw("aiueos", "would-launch"), E::int(grants.len() as i64)),
+                    ]))
+                );
+            }
+            return Ok(());
         }
 
         // Stages 3–4: verify + launch in order, for `--rounds` rounds on a shared
