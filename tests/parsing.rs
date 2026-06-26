@@ -243,6 +243,24 @@ fn manifest_rejects_malformed_topics_map() {
 }
 
 #[test]
+fn coarse_topic_gates_are_not_derived_as_named_topics() {
+    // :topic/cmd is a named data topic (→2); :topic/subscribe is the coarse gate
+    // cap — even though a topics map names :subscribe, it must NOT be derived.
+    let m = Manifest::parse_str(
+        r#"{:aiueos/component :d/x :aiueos/kind :driver
+            :aiueos/imports #{:topic/subscribe :topic/cmd}
+            :aiueos/topics {:subscribe 99 :cmd 2}}"#,
+    )
+    .unwrap();
+    let subs = m.subscribes.unwrap();
+    assert!(subs.contains(&2));
+    assert!(
+        !subs.contains(&99),
+        "the coarse topic/subscribe gate is not a data topic"
+    );
+}
+
+#[test]
 fn explicit_publishes_override_derivation() {
     let m = Manifest::parse_str(
         r#"{:aiueos/component :d/x :aiueos/kind :driver

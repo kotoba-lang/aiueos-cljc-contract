@@ -72,6 +72,9 @@ fn derive_topic_ids(
     let set: std::collections::BTreeSet<i32> = caps
         .iter()
         .filter_map(|c| c.strip_prefix("topic/"))
+        // `topic/publish` & `topic/subscribe` are the coarse gate capabilities,
+        // not named data topics — never derive an id from them.
+        .filter(|name| *name != "publish" && *name != "subscribe")
         .filter_map(|name| topics.get(name).copied())
         .collect();
     (!set.is_empty()).then_some(set)
