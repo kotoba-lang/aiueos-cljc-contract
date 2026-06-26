@@ -171,15 +171,19 @@ $BIN inspect examples/system.aiueos.edn --edn
 > robot system above is pure WAT and needs nothing but the default build.
 
 ```text
-aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]   capability + policy check
-aiueos inspect <system>.edn          [--policy p.edn] [--edn]   print the capability graph
-aiueos up      <system>.edn          [--policy p.edn] [--edn]   boot the whole system (Stage 0–4)
+aiueos verify  <manifest|system>.edn [--policy p.edn] [--edn]        capability + policy check
+aiueos inspect <system>.edn          [--policy p.edn] [--edn|--dot]  capability graph (text / EDN / Graphviz)
+aiueos up      <system>.edn          [--policy p.edn] [--edn] [--rounds N] [--dry-run]   boot the system
 aiueos run     <manifest>.edn        [--policy p.edn] [--system s.edn] [--edn]
-aiueos compile <source.clj|manifest> [-o out.wasm]      CLJ/Kotoba → wasm
-aiueos check   <source.clj>                             safe-kotoba subset gate
-aiueos hash    <file> [--edn]                           sha256 for :aiueos/wasm-sha256
-aiueos audit   [--log <audit.edn>]                      replay the audit log
+aiueos compile <source.clj|manifest> [-o out.wasm]                   CLJ/Kotoba → wasm (kototama feature)
+aiueos check   <source.clj>                                          safe-kotoba subset gate
+aiueos hash    <file> [--edn]                                        sha256 for :aiueos/wasm-sha256
+aiueos audit   [--log <audit.edn>] [--event K] [--component C] [--edn]   replay/query the audit log
 ```
+
+`--edn` (machine-readable) is accepted by `verify`/`inspect`/`up`/`run`/`audit`;
+`up --rounds N` runs a periodic control loop; `up --dry-run` validates without
+launching; `inspect --dot` emits Graphviz.
 
 All four inspection/execution commands (`verify`/`inspect`/`up`/`run`) accept
 `--edn` for machine-readable output — success verdicts, denials, *and* structural
