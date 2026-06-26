@@ -409,6 +409,28 @@ fn policy_rejects_unknown_keys() {
 }
 
 #[test]
+fn policy_accepts_all_known_keys() {
+    // Every recognized :aiueos/* policy key together — keep in sync with the
+    // strict POLICY_KEYS set so a new key can't be added without an acceptance test.
+    let p = Policy::from_edn(
+        &kotoba_edn::parse(
+            r#"{:aiueos/policy :full
+                :aiueos/kernel-caps #{:extra/cap}
+                :aiueos/grants {:driver/x #{:iommu}}
+                :aiueos/forbid {:untrusted #{:secrets}}
+                :aiueos/signers {:alice "abcd"}
+                :aiueos/require-signed true}"#,
+        )
+        .unwrap(),
+    )
+    .expect("all recognized policy keys parse");
+    assert!(p.kernel_caps.contains("extra/cap"));
+    assert!(p.grants.get("driver/x").unwrap().contains("iommu"));
+    assert_eq!(p.signers.get("alice").map(String::as_str), Some("abcd"));
+    assert!(p.require_signed);
+}
+
+#[test]
 fn policy_default_locks_down_ai_generated() {
     let p = Policy::default();
     let f = p.forbid_effects.get(&Trust::AiGenerated).unwrap();
