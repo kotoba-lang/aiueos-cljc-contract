@@ -428,6 +428,32 @@ fn audit_round_trips_entries() {
 }
 
 #[test]
+fn audit_records_every_event_kind() {
+    // Each Event variant maps to its keyword — Compile/Reject are otherwise only
+    // hit on the dormant compile path / runtime traps.
+    let path = std::env::temp_dir().join("aiueos-audit-events.edn");
+    let _ = std::fs::remove_file(&path);
+    let log = AuditLog::new(&path);
+    for ev in [
+        Event::Grant,
+        Event::Deny,
+        Event::Compile,
+        Event::Run,
+        Event::Reject,
+    ] {
+        log.append(ev, "c", "d").unwrap();
+    }
+    let kinds: Vec<String> = log
+        .read()
+        .unwrap()
+        .iter()
+        .filter_map(|e| edn::get_kw(e, "aiueos", "event"))
+        .collect();
+    assert_eq!(kinds, ["grant", "deny", "compile", "run", "reject"]);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn audit_read_missing_file_is_empty() {
     let path = std::env::temp_dir().join("aiueos-audit-does-not-exist-xyz.edn");
     let _ = std::fs::remove_file(&path);
