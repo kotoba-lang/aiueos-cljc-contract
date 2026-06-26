@@ -27,7 +27,55 @@ const MANIFEST_KEYS: &[&str] = &[
     "wasm-sha256",
     "publishes",
     "subscribes",
+    "topics",
 ];
+
+/// Parse `:aiueos/topics {:name id …}` (name→topic-id map). Absent → empty.
+fn topic_name_map(v: &EdnValue, id: &str) -> Result<std::collections::BTreeMap<String, i32>> {
+    let mut out = std::collections::BTreeMap::new();
+    let m = match edn::get(v, "aiueos", "topics") {
+        None => return Ok(out),
+        Some(EdnValue::Map(m)) => m,
+        Some(_) => {
+            return Err(AiueosError::Schema(format!(
+                "{id}: :aiueos/topics must be a map of name → topic id"
+            )))
+        }
+    };
+    for (k, val) in m {
+        let name = k
+            .as_keyword()
+            .map(|kw| kw.name().to_string())
+            .ok_or_else(|| {
+                AiueosError::Schema(format!("{id}: :aiueos/topics keys must be keywords"))
+            })?;
+        let n = val
+            .as_integer()
+            .filter(|n| *n >= i32::MIN as i64 && *n <= i32::MAX as i64);
+        let n = n.ok_or_else(|| {
+            AiueosError::Schema(format!(
+                "{id}: :aiueos/topics values must be topic ids (i32)"
+            ))
+        })?;
+        out.insert(name, n as i32);
+    }
+    Ok(out)
+}
+
+/// Map named topic capabilities (`topic/<name>`) in `caps` to their numeric ids
+/// via the `topics` map. `None` if none resolve (so the caller leaves the access
+/// unrestricted rather than declaring an empty allow-set).
+fn derive_topic_ids(
+    caps: &[String],
+    topics: &std::collections::BTreeMap<String, i32>,
+) -> Option<std::collections::BTreeSet<i32>> {
+    let set: std::collections::BTreeSet<i32> = caps
+        .iter()
+        .filter_map(|c| c.strip_prefix("topic/"))
+        .filter_map(|name| topics.get(name).copied())
+        .collect();
+    (!set.is_empty()).then_some(set)
+}
 
 /// Parse an optional `:aiueos/{publishes,subscribes}` set of topic ids. Absent →
 /// `None` (unrestricted). A non-set/vector, or a non-integer / out-of-range
@@ -239,6 +287,10 @@ pub struct Manifest {
     pub publishes: Option<std::collections::BTreeSet<i32>>,
     /// Topic ids this component may read (poll/take/count). `None` = unrestricted.
     pub subscribes: Option<std::collections::BTreeSet<i32>>,
+    /// Named topic → numeric id map (`:aiueos/topics`). Links the named topic
+    /// capabilities to the runtime ids; `publishes`/`subscribes` are derived from
+    /// it when not given explicitly.
+    pub topics: std::collections::BTreeMap<String, i32>,
 }
 
 impl Manifest {
@@ -341,8 +393,21 @@ impl Manifest {
             Some(e) => e,
         };
 
-        let publishes = topic_id_set(v, "publishes", &id)?;
-        let subscribes = topic_id_set(v, "subscribes", &id)?;
+        let imports = edn::kw_collection(edn::get(v, "aiueos", "imports"));
+        let exports = edn::kw_collection(edn::get(v, "aiueos", "exports"));
+        let topics = topic_name_map(v, &id)?;
+
+        // Per-topic runtime isolation: use the explicit numeric set if given, else
+        // derive it from the named topic exports/imports via the :aiueos/topics
+        // name→id map (so the named graph topics and the runtime ids stay linked).
+        let publishes = match topic_id_set(v, "publishes", &id)? {
+            Some(p) => Some(p),
+            None => derive_topic_ids(&exports, &topics),
+        };
+        let subscribes = match topic_id_set(v, "subscribes", &id)? {
+            Some(s) => Some(s),
+            None => derive_topic_ids(&imports, &topics),
+        };
 
         Ok(Manifest {
             id,
@@ -351,8 +416,8 @@ impl Manifest {
             source: edn::get_str(v, "aiueos", "source"),
             wasm: edn::get_str(v, "aiueos", "wasm"),
             wasm_sha256: edn::get_str(v, "aiueos", "wasm-sha256"),
-            imports: edn::kw_collection(edn::get(v, "aiueos", "imports")),
-            exports: edn::kw_collection(edn::get(v, "aiueos", "exports")),
+            imports,
+            exports,
             effects: edn::kw_collection(edn::get(v, "aiueos", "effects")),
             requires: edn::kw_collection(edn::get(v, "aiueos", "requires")),
             limits,
@@ -361,6 +426,7 @@ impl Manifest {
             device: edn::get(v, "aiueos", "device").map(Device::from_edn),
             publishes,
             subscribes,
+            topics,
         })
     }
 

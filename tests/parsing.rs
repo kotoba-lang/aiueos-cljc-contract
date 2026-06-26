@@ -102,10 +102,12 @@ fn manifest_accepts_all_known_keys() {
             :aiueos/imports #{:dma/map} :aiueos/exports #{:block/read}
             :aiueos/effects #{:dma} :aiueos/requires #{:iommu}
             :aiueos/limits {:memory-pages 8 :fuel 99} :aiueos/entry "go" :aiueos/args [1 2]
-            :aiueos/device {:bus :pci} :aiueos/publishes #{1} :aiueos/subscribes #{2}}"#,
+            :aiueos/device {:bus :pci} :aiueos/publishes #{1} :aiueos/subscribes #{2}
+            :aiueos/topics {:scan 1}}"#,
     )
     .expect("all recognized keys parse");
     assert_eq!(m.id, "driver/full");
+    assert_eq!(m.topics.get("scan"), Some(&1));
     assert_eq!(m.args, vec![1, 2]);
     assert_eq!(m.wasm_sha256.as_deref(), Some("abc"));
     assert!(m.publishes.unwrap().contains(&1));
@@ -206,6 +208,36 @@ fn manifest_parses_topic_id_sets() {
     // absent → unrestricted (None)
     let n = Manifest::parse_str("{:aiueos/component :d/y :aiueos/kind :driver}").unwrap();
     assert!(n.publishes.is_none() && n.subscribes.is_none());
+}
+
+#[test]
+fn publishes_subscribes_derived_from_named_topics() {
+    // exports :topic/scan + topics {:scan 1} → publishes {1} (derived);
+    // imports :topic/cmd + topics {:cmd 2} → subscribes {2} (derived).
+    let m = Manifest::parse_str(
+        r#"{:aiueos/component :agent/p :aiueos/kind :agent
+            :aiueos/imports #{:topic/subscribe :topic/cmd}
+            :aiueos/exports #{:topic/scan}
+            :aiueos/topics {:scan 1 :cmd 2}}"#,
+    )
+    .unwrap();
+    assert_eq!(m.publishes.unwrap(), [1].into_iter().collect());
+    assert_eq!(m.subscribes.unwrap(), [2].into_iter().collect());
+}
+
+#[test]
+fn explicit_publishes_override_derivation() {
+    let m = Manifest::parse_str(
+        r#"{:aiueos/component :d/x :aiueos/kind :driver
+            :aiueos/exports #{:topic/scan} :aiueos/topics {:scan 1}
+            :aiueos/publishes #{9}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        m.publishes.unwrap(),
+        [9].into_iter().collect(),
+        "explicit publishes win over derivation"
+    );
 }
 
 #[test]

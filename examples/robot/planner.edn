@@ -11,8 +11,7 @@
  ;; in the capability graph, so boot order follows the dataflow.
  :aiueos/imports #{:topic/subscribe :topic/publish :topic/scan}
  :aiueos/exports #{:topic/cmd}
- ;; runtime isolation: reads ONLY topic 1 ("scan"), publishes ONLY topic 2 ("cmd").
- :aiueos/subscribes #{1}
- :aiueos/publishes #{2}
+ ;; subscribes (scan→1) and publishes (cmd→2) are DERIVED from this name→id map.
+ :aiueos/topics {:scan 1 :cmd 2}
  :aiueos/effects #{:compute}
  :aiueos/limits {:memory-pages 4 :fuel 1000000}}

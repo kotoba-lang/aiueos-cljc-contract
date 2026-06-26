@@ -236,8 +236,9 @@ Every recognized key — anything else in the `:aiueos/` namespace is rejected.
 | `:aiueos/entry` | exported wasm fn to call (default `"main"`) |
 | `:aiueos/args` | i64 arguments to the entry |
 | `:aiueos/device` | driver device binding `{:bus :vendor :device …}` (exclusive) |
-| `:aiueos/publishes` | topic ids this component may publish to (per-topic isolation) |
-| `:aiueos/subscribes` | topic ids this component may read |
+| `:aiueos/topics` | named-topic → id map; `publishes`/`subscribes` are *derived* from the exported/imported `:topic/<name>` capabilities via this map |
+| `:aiueos/publishes` | topic ids this component may publish to (per-topic isolation; overrides derivation) |
+| `:aiueos/subscribes` | topic ids this component may read (overrides derivation) |
 
 ## Robotics: capabilities you actually *call* at run time
 
