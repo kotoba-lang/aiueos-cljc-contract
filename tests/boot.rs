@@ -105,6 +105,37 @@ fn boot_rounds_threads_one_bus_across_rounds() {
 }
 
 #[test]
+fn random_differs_across_rounds() {
+    // A node returns random() each round; the control-loop cycle advances per
+    // round, so the readings differ — random + rounds integrated.
+    let dir = std::env::temp_dir().join("aiueos-randrounds-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("noisy.wat"),
+        r#"(module (import "aiueos:host" "random" (func $r (result i64)))
+            (func (export "tick") (result i64) (call $r)))"#,
+    )
+    .unwrap();
+    let m = Manifest::parse_str(&format!(
+        r#"{{:aiueos/component :driver/noisy :aiueos/kind :driver :aiueos/wasm "{}"
+            :aiueos/entry "tick" :aiueos/imports #{{:random/bytes}}}}"#,
+        dir.join("noisy.wat").display()
+    ))
+    .unwrap();
+    let sys = System::from_manifests("noisy", vec![m]);
+    let broker = Broker::new(Policy::default(), scratch_audit("aiueos-randrounds.edn"));
+    let reports = broker
+        .boot_rounds(&sys, Path::new("."), 3)
+        .expect("3 rounds");
+    let vals: Vec<i64> = reports
+        .iter()
+        .map(|r| r.launched[0].result.unwrap())
+        .collect();
+    assert_ne!(vals[0], vals[1], "random advances with the cycle");
+    assert_ne!(vals[1], vals[2]);
+}
+
+#[test]
 fn clock_advances_across_rounds() {
     // clock() returns the control-loop cycle, so across 3 rounds it reads 0,1,2.
     let dir = std::env::temp_dir().join("aiueos-clock-test");
