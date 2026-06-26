@@ -211,6 +211,21 @@ fn random_varies_across_calls_in_one_run() {
 }
 
 #[test]
+fn random_is_decorrelated_across_distinct_components() {
+    // Same cycle, but different run signatures (distinct args) → independent
+    // streams, not the same value. Guards against correlated multi-agent randomness.
+    const RANDOM: &str = r#"(module
+      (import "aiueos:host" "random" (func $r (result i64)))
+      (func (export "run") (param i64) (result i64) (call $r)))"#;
+    let a = run(RANDOM, &[1], &caps(&["random/bytes"])).expect("granted");
+    let b = run(RANDOM, &[2], &caps(&["random/bytes"])).expect("granted");
+    assert_ne!(
+        a.result, b.result,
+        "distinct components get independent streams"
+    );
+}
+
+#[test]
 fn capability_attenuation_traps_on_the_missing_one() {
     // Granted subscribe (poll succeeds) but NOT publish → the publish traps even
     // though the component got partway. A capability you weren't given can't be

@@ -50,6 +50,30 @@ fn topic_ok(set: &Option<BTreeSet<i32>>, topic: i32) -> bool {
     set.as_ref().map_or(true, |s| s.contains(&topic))
 }
 
+/// FNV-1a over `bytes`, continuing from `h`.
+fn fnv1a(mut h: u64, bytes: &[u8]) -> u64 {
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    h
+}
+
+/// A deterministic per-run seed from the run signature (entry + args + caps).
+/// Distinct components → distinct seeds → independent `random()` streams; two
+/// truly identical runs share a stream (they're indistinguishable). `caps` is a
+/// BTreeSet, so iteration order is stable.
+fn run_seed(entry: &str, args: &[i64], caps: &BTreeSet<String>) -> u64 {
+    let mut h = fnv1a(0xcbf2_9ce4_8422_2325, entry.as_bytes());
+    for a in args {
+        h = fnv1a(h, &a.to_le_bytes());
+    }
+    for c in caps {
+        h = fnv1a(h, c.as_bytes());
+    }
+    h
+}
+
 /// splitmix64 — a fast, well-distributed mixing function. Used to make `random()`
 /// deterministic-yet-varied from a seed (reproducible Phase-0 randomness).
 fn splitmix64(seed: u64) -> u64 {
@@ -68,6 +92,10 @@ pub struct HostCtx {
     bus: TopicBus,
     logs: Vec<i64>,
     calls: usize,
+    /// Per-run base seed for `random()` — derived from the run signature
+    /// (entry + args + caps) so distinct components draw *independent* streams
+    /// rather than the same value at the same cycle.
+    seed: u64,
 }
 
 /// What a host-enabled run produced.
@@ -174,13 +202,12 @@ pub fn run_with_host_restricted(
                 // call order → same stream, by design (Phase-0 determinism).
                 // NOT a CSPRNG — predictable; never use for keys/nonces/secrets.
                 let d = c.data_mut();
-                let seed = d
-                    .bus
-                    .tick()
-                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                let mixed = d
+                    .seed
+                    .wrapping_add(d.bus.tick().wrapping_mul(0x9E37_79B9_7F4A_7C15))
                     .wrapping_add(d.calls as u64);
                 d.calls += 1;
-                Ok(splitmix64(seed) as i64)
+                Ok(splitmix64(mixed) as i64)
             },
         )
         .map_err(run_err)?;
@@ -261,6 +288,7 @@ pub fn run_with_host_restricted(
         bus,
         logs: Vec::new(),
         calls: 0,
+        seed: run_seed(entry, args, caps),
     };
     let mut store = Store::new(&engine, ctx);
     store.limiter(|c| &mut c.limits);
