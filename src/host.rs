@@ -172,6 +172,7 @@ pub fn run_with_host_restricted(
                 // Deterministic (reproducible) pseudo-random: splitmix64 over the
                 // control-loop cycle + this run's call index. Same cycle + same
                 // call order → same stream, by design (Phase-0 determinism).
+                // NOT a CSPRNG — predictable; never use for keys/nonces/secrets.
                 let d = c.data_mut();
                 let seed = d
                     .bus

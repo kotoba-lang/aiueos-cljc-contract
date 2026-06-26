@@ -92,6 +92,11 @@ refuses to provide what that surface shouldn't.
   the broker, and topics are still numeric ids rather than named, graph-wired
   capabilities.
 - **No confidentiality/crypto** of audit logs or component state at rest.
+- **`random()` is deterministic, not a CSPRNG.** The `aiueos:host` `random()` call
+  is a reproducible pseudo-random stream (splitmix64 over the control-loop cycle)
+  — chosen for deterministic, replayable boots. It is **predictable** and must
+  **not** be used for keys, nonces, tokens, or any security-sensitive value. A
+  real entropy source is future work.
 
 If a deployment needs any of the above, it must add it above aiueos — the design
 makes room for these (signing hooks, per-surface providers, scheduler) but
