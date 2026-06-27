@@ -31,6 +31,7 @@ const MANIFEST_KEYS: &[&str] = &[
     "signer",
     "signature",
     "quota",
+    "schedule",
 ];
 
 /// Parse `:aiueos/topics {:name id …}` (name→topic-id map). Absent → empty.
@@ -281,6 +282,70 @@ impl Default for Quota {
     }
 }
 
+/// Per-component scheduling, derived to cycles (`:aiueos/schedule`, ADR-0006).
+/// The control loop has no wall clock — `:*-ms` fields are pinned to cycles via a
+/// declared `:cycle-ms` ratio, so scheduling stays deterministic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schedule {
+    /// Run once every N cycles (≥1). Derived: ceil(period-ms / cycle-ms).
+    pub period_cycles: u64,
+    /// Must finish within M cycles of release (≥1). Derived from deadline-ms.
+    pub deadline_cycles: u64,
+    /// Lower = more urgent (rate-monotonic-ish). Default 100.
+    pub priority: u32,
+}
+
+impl Default for Schedule {
+    fn default() -> Self {
+        Schedule {
+            period_cycles: 1,
+            deadline_cycles: 1,
+            priority: 100,
+        }
+    }
+}
+
+/// Recognized `:aiueos/schedule` sub-keys — any other is a typo and rejected.
+const SCHEDULE_KEYS: &[&str] = &["period-ms", "deadline-ms", "priority", "cycle-ms"];
+
+/// Parse `:aiueos/schedule {…}` (ADR-0006), deriving period/deadline to cycles via
+/// the declared `:cycle-ms` ratio. Absent → defaults (every cycle, priority 100).
+/// Non-integer / out-of-range / unknown sub-key is a hard error.
+fn parse_schedule(v: &EdnValue, id: &str) -> Result<Schedule> {
+    let s = match edn::get(v, "aiueos", "schedule") {
+        None => return Ok(Schedule::default()),
+        Some(m @ EdnValue::Map(_)) => m,
+        Some(_) => {
+            return Err(AiueosError::Schema(format!(
+                "{id}: :aiueos/schedule must be a map"
+            )))
+        }
+    };
+    if let EdnValue::Map(m) = s {
+        for (k, _) in m {
+            let name = k.as_keyword().map(|kw| kw.name()).unwrap_or("");
+            if !SCHEDULE_KEYS.contains(&name) {
+                return Err(AiueosError::Schema(format!(
+                    "{id}: unknown :aiueos/schedule key :{name}"
+                )));
+            }
+        }
+    }
+    // cycle-ms is the declared nominal duration of one cycle (default 1 → ms = cycles).
+    let cycle_ms = read_limit(s, "cycle-ms", id, 1, i64::MAX, 1)?;
+    // period defaults to one cycle; deadline defaults to the period (implicit-deadline).
+    let period_ms = read_limit(s, "period-ms", id, 1, i64::MAX, cycle_ms)?;
+    let deadline_ms = read_limit(s, "deadline-ms", id, 1, i64::MAX, period_ms)?;
+    let priority = read_limit(s, "priority", id, 0, u32::MAX as i64, 100)? as u32;
+    // ceil(a / b), at least one cycle.
+    let to_cycles = |ms: i64| ((ms + cycle_ms - 1) / cycle_ms).max(1) as u64;
+    Ok(Schedule {
+        period_cycles: to_cycles(period_ms),
+        deadline_cycles: to_cycles(deadline_ms),
+        priority,
+    })
+}
+
 /// Recognized `:aiueos/quota` sub-keys — any other is a typo and rejected.
 const QUOTA_KEYS: &[&str] = &["host-calls", "publishes"];
 
@@ -356,6 +421,8 @@ pub struct Manifest {
     pub signature: Option<String>,
     /// Per-cycle host-call rate caps (`:aiueos/quota`, ADR-0006). Defaulted when absent.
     pub quota: Quota,
+    /// Per-component scheduling (`:aiueos/schedule`, ADR-0006). Defaulted when absent.
+    pub schedule: Schedule,
 }
 
 impl Manifest {
@@ -423,6 +490,7 @@ impl Manifest {
             None => Limits::default(),
         };
         let quota = parse_quota(v, &id)?;
+        let schedule = parse_schedule(v, &id)?;
 
         // `:aiueos/args` must be a vector of integers (the i64 args passed to the
         // entry). Silently dropping a non-integer element or ignoring a non-vector
@@ -496,6 +564,7 @@ impl Manifest {
             signer: edn::get_str(v, "aiueos", "signer"),
             signature: edn::get_str(v, "aiueos", "signature"),
             quota,
+            schedule,
         })
     }
 

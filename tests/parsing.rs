@@ -104,7 +104,8 @@ fn manifest_accepts_all_known_keys() {
             :aiueos/limits {:memory-pages 8 :fuel 99} :aiueos/entry "go" :aiueos/args [1 2]
             :aiueos/device {:bus :pci} :aiueos/publishes #{1} :aiueos/subscribes #{2}
             :aiueos/topics {:scan 1} :aiueos/signer "alice" :aiueos/signature "9c2e"
-            :aiueos/quota {:host-calls 32 :publishes 4}}"#,
+            :aiueos/quota {:host-calls 32 :publishes 4}
+            :aiueos/schedule {:period-ms 20 :priority 5 :cycle-ms 10}}"#,
     )
     .expect("all recognized keys parse");
     assert_eq!(m.id, "driver/full");
@@ -113,6 +114,8 @@ fn manifest_accepts_all_known_keys() {
     assert_eq!(m.signature.as_deref(), Some("9c2e"));
     assert_eq!(m.quota.host_calls, 32);
     assert_eq!(m.quota.publishes, 4);
+    assert_eq!(m.schedule.period_cycles, 2); // ceil(20 / 10)
+    assert_eq!(m.schedule.priority, 5);
     assert_eq!(m.args, vec![1, 2]);
     assert_eq!(m.wasm_sha256.as_deref(), Some("abc"));
     assert!(m.publishes.unwrap().contains(&1));
@@ -258,6 +261,39 @@ fn quota_defaults_when_absent_and_parses_when_present() {
     .unwrap();
     assert_eq!(m.quota.host_calls, 8);
     assert_eq!(m.quota.publishes, 2);
+}
+
+#[test]
+fn schedule_defaults_and_derives_cycles() {
+    // absent → run every cycle, priority 100
+    let d = Manifest::parse_str("{:aiueos/component :a/x :aiueos/kind :app}").unwrap();
+    assert_eq!(d.schedule.period_cycles, 1);
+    assert_eq!(d.schedule.deadline_cycles, 1);
+    assert_eq!(d.schedule.priority, 100);
+    // period-ms/cycle-ms derive to ceil; deadline defaults to the period
+    let m = Manifest::parse_str(
+        "{:aiueos/component :a/x :aiueos/kind :app
+          :aiueos/schedule {:period-ms 25 :cycle-ms 10 :priority 1}}",
+    )
+    .unwrap();
+    assert_eq!(m.schedule.period_cycles, 3, "ceil(25/10)");
+    assert_eq!(m.schedule.deadline_cycles, 3, "deadline defaults to period");
+    assert_eq!(m.schedule.priority, 1);
+}
+
+#[test]
+fn manifest_rejects_malformed_schedule() {
+    for bad in [
+        "{:aiueos/component :a/x :aiueos/kind :app :aiueos/schedule 5}",
+        "{:aiueos/component :a/x :aiueos/kind :app :aiueos/schedule {:periodms 10}}",
+        r#"{:aiueos/component :a/x :aiueos/kind :app :aiueos/schedule {:priority "high"}}"#,
+        "{:aiueos/component :a/x :aiueos/kind :app :aiueos/schedule {:cycle-ms 0}}",
+    ] {
+        assert!(
+            matches!(Manifest::parse_str(bad), Err(AiueosError::Schema(_))),
+            "should reject: {bad}"
+        );
+    }
 }
 
 #[test]
