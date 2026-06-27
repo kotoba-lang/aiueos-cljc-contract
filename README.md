@@ -266,7 +266,9 @@ Every recognized key — anything else in the `:aiueos/` namespace is rejected.
 | `:aiueos/exports` | capabilities provided to others |
 | `:aiueos/effects` | side effects (`:dma` `:network` `:device-io` …) — gated by trust/DMA rules |
 | `:aiueos/requires` | hardware/runtime requirements (e.g. `:iommu`) |
-| `:aiueos/limits` | `{:memory-pages 1..65536 :fuel ≥1}` |
+| `:aiueos/limits` | `{:memory-pages 1..65536 :fuel ≥1}` — per-run CPU/RAM caps |
+| `:aiueos/quota` | `{:host-calls N :publishes N}` — per-cycle host-call rate caps; an over-budget call traps (ADR-0006) |
+| `:aiueos/schedule` | `{:period-ms :deadline-ms :priority :cycle-ms}` — cooperative scheduling, derived to cycles; period-skipping + priority within dependency depth (ADR-0006) |
 | `:aiueos/entry` | exported wasm fn to call (default `"main"`) |
 | `:aiueos/args` | i64 arguments to the entry |
 | `:aiueos/device` | driver device binding `{:bus :vendor :device …}` (exclusive) |
@@ -383,19 +385,18 @@ cargo test --features kototama --target "$(rustc -vV | sed -n 's/host: //p')"
 (The `--target` is only needed in the monorepo, where a parent `.cargo/config`
 defaults the build target to wasm32.)
 
-## Roadmap (this crate = Phase 0)
+## Roadmap
 
 | phase | scope | status |
 |---|---|---|
-| 0 | manifests (fail-loud validation), capability graph, policy reasoner, broker, safe-check, append-only **+ queryable** audit, staged boot (`aiueos up`, Stage 0–4) | ✅ this crate |
-| 0+ | **runtime-enforced capabilities**: `aiueos:host` ABI (log/clock/publish/poll/take/count) + pub/sub topic bus with FIFO queues; **per-topic isolation**; **periodic control loop** (`--rounds`); device binding + exclusivity; **artifact integrity** (`:aiueos/wasm-sha256`); machine-readable `--edn` surface (verify/inspect/up/run/audit) → sensor→planner→actuator robot demo | ✅ this crate |
-| 1 | richer kotoba manifest/policy/**proof** system (signed manifests / provenance) | 🔜 |
-| 2 | typed safe-kotoba compiler (effects + capabilities in the type system) | 🔜 |
-| 3 | real service components (log/kv/vfs/net-proxy) | 🔜 |
-| 4 | virtio mock drivers as components | partial (logic stub) |
-| 5 | microVM image (unikernel / minimal Linux host) | 🔜 |
-| 6 | aiueos microkernel (boot/mem/IPC/cap table/sched/IRQ) | 🔜 |
-| 7 | real drivers: serial → fb → virtio-blk/net/input/gpu → NVMe → USB → GPU → Wi-Fi | 🔜 |
+| 0 | manifests (fail-loud), capability graph, policy reasoner, broker, safe-check, queryable audit, staged boot; **runtime-enforced** `aiueos:host` ABI (log/clock/random/publish/poll/take/count) + FIFO topic bus, per-topic isolation, `--rounds` control loop, artifact integrity, `--edn` agent surface | ✅ |
+| 1 | **authenticity** — ed25519 signed manifests, signer registry, trust elevation, provenance, `require-signed`, `aiueos sign` ([ADR-0003](90-docs/adr/0003-signed-manifests.md)) | ✅ |
+| 2 | **code as data** — `aiueos admit`: trust floored to `:ai-generated`, structured verdict + reason-codes for an agent loop ([ADR-0004](90-docs/adr/0004-code-as-data-admit.md)) | ✅ |
+| 3 | **multi-surface providers** — one model on edge/robotics/cloud/browser/client ([ADR-0005](90-docs/adr/0005-multi-surface-providers.md)) | 📋 designed |
+| 4 | **scheduler + IO quota** — per-cycle host-call caps, cooperative period/priority scheduling ([ADR-0006](90-docs/adr/0006-scheduler-and-io-quota.md)) | ✅ |
+| 5 | cross-machine messaging + publisher authentication | 🔜 |
+| 6 | aiueos microkernel (boot/mem/IPC/cap table/preemptive sched/IRQ) | 🔜 |
+| 7 | real drivers: serial → fb → virtio-blk/net → NVMe → USB → GPU → Wi-Fi (MMIO/DMA/IRQ) | 🔜 |
 
 The design keeps the **TCB small**: microkernel + Wasm runtime + kototama +
 broker + manifest/proof verifier + tiny unsafe hardware adapters. Apps, services,

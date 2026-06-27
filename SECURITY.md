@@ -88,9 +88,14 @@ refuses to provide what that surface shouldn't.
   expiry, no revocation, and no certificate chains / delegation. A compromised
   signer key can only be handled by editing the policy. CID-addressed
   supply-chain integrity is also still future work.
-- **Wall-clock / IO DoS.** Fuel bounds CPU instructions and the page cap bounds
-  memory, but a component can still issue many host calls; rate/quota limits on
-  IO and a real-time scheduler are future work.
+- **Preemptive / hard real-time scheduling.** Per-cycle **IO quotas** now bound
+  host-call rate (`:aiueos/quota {:host-calls N :publishes N}` — an over-budget
+  call traps like any other), and a **deterministic cooperative scheduler**
+  (`:aiueos/schedule`, ADR-0006) gives period-skipping and priority ordering
+  within dependency depth. What is *not* present is **preemption**: execution is
+  cooperative (a component runs to completion or to a fuel/quota trap), so a
+  deadline is an audited service-level signal, not an enforced one. True
+  preemptive hard-real-time needs the Phase-6 microkernel.
 - **Lowest-level drivers.** Real MMIO/DMA/IRQ adapters (Phase 7) will contain
   small `unsafe` code; that code, once written, is part of the TCB and must be
   audited as such.

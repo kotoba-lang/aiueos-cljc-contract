@@ -37,6 +37,11 @@ The Phase-0 substrate plus the runtime/robotics/agent work built on top of it.
 - **Periodic control loop** (`aiueos up --rounds N`): one bus threaded across N
   rounds; `clock()` returns the monotonic cycle.
 - Fuel + linear-memory limits enforced; runaways trap.
+- **Per-cycle IO quota** (`:aiueos/quota`, ADR-0006): host-call / publish rate caps
+  enforced in the host ABI — an over-budget call traps like an ungranted capability.
+- **Cooperative scheduler** (`:aiueos/schedule`, ADR-0006): deterministic
+  period-skipping (run every N cycles) + priority ordering *within* dependency
+  depth, so an urgent node runs earlier without ever preceding its provider.
 
 ### Security / supply chain
 - **Artifact integrity**: `:aiueos/wasm-sha256` is verified before run
@@ -48,6 +53,14 @@ The Phase-0 substrate plus the runtime/robotics/agent work built on top of it.
   components. `aiueos sign` produces signatures (`signing` feature, default-on).
 - **Audit**: append-only EDN log records grant/deny/compile/run **and runtime
   traps (reject)**; queryable with `aiueos audit --event/--component/--edn`.
+
+### Code as data (agent admission)
+- **`Broker::admit` / `aiueos admit`** (ADR-0004): the front door for a component
+  an AI agent emits at runtime. Trust is **floored to `:ai-generated`** before
+  verification — agent code can never grant itself trust (a signature can still
+  elevate it). Returns a structured verdict `{admitted, result, reason,
+  reason-code}` so an agent loop branches on a stable `:reason-code`
+  (`:denied` / `:unsafe` / `:run` / …) and iterates.
 
 ### Tooling / agent surface
 - Machine-readable **`--edn`** on `verify`/`inspect`/`up`/`run`/`audit` (verdicts,
@@ -64,6 +77,6 @@ The Phase-0 substrate plus the runtime/robotics/agent work built on top of it.
 - Standalone build: `kotoba-edn` is a git dependency; the CLJ compiler
   (`kototama`) is an opt-in monorepo-only feature.
 - **CI** (GitHub Actions): core + exec-only + rustfmt.
-- **170 tests + 3 doctests** green across the core / exec-only / full configs.
+- **193 tests + 3 doctests** green across the core / exec-only / full configs.
 
 [Unreleased]: https://github.com/com-junkawasaki/aiueos/commits/main
