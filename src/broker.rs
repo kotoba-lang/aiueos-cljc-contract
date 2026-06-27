@@ -226,21 +226,34 @@ impl Broker {
             .map(|g| (g.component, g.capabilities))
             .collect();
 
-        // Stage 4: launch in order, once per round, on a shared bus.
+        // Stage 4: launch in order, once per round, on a shared bus. The scheduler
+        // (ADR-0006) refines the topological order by priority *within* dependency
+        // depth, so an urgent node runs earlier without ever preceding its provider.
         let empty = std::collections::BTreeSet::new();
+        let depths = system.depths();
+        let topo_pos: std::collections::BTreeMap<usize, usize> =
+            order.iter().enumerate().map(|(p, &i)| (i, p)).collect();
         let mut bus = TopicBus::new();
         let mut reports = Vec::with_capacity(rounds.max(1));
         for cycle in 0..rounds.max(1) {
             let mut launched = Vec::new();
-            for &i in &order {
+            // Release the components whose period is due this cycle (period_cycles=1,
+            // the default, = every cycle), then order them by (depth, priority,
+            // topo-position) — dataflow-correct, with priority breaking ties.
+            let mut released: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|&i| (cycle as u64) % system.components[i].schedule.period_cycles == 0)
+                .collect();
+            released.sort_by_key(|&i| {
+                (
+                    depths[i],
+                    system.components[i].schedule.priority,
+                    topo_pos[&i],
+                )
+            });
+            for &i in &released {
                 let m = &system.components[i];
-                // Cooperative scheduler (ADR-0006): a component is *released* only
-                // on cycles its period is due — `period_cycles = 1` (the default)
-                // runs every cycle. Released components keep their topological order
-                // (a provider before its consumer), so dataflow stays correct.
-                if (cycle as u64) % m.schedule.period_cycles != 0 {
-                    continue;
-                }
                 let base = &system.bases[i];
                 if m.source.is_none() && m.wasm.is_none() {
                     // A pure manifest with no code is a declaration-only/resident

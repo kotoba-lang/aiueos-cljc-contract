@@ -151,6 +151,44 @@ impl System {
     pub fn graph(&self) -> CapabilityGraph {
         CapabilityGraph::build(&self.components)
     }
+
+    /// Dependency depth of each component: 0 for a component nothing it imports is
+    /// provided by another component (a source), else `1 + max(provider depth)`.
+    /// Components at the *same* depth are in no provider→consumer relationship, so
+    /// the scheduler may reorder them by priority without breaking dataflow
+    /// (ADR-0006). On a cycle, falls back to index order.
+    pub fn depths(&self) -> Vec<u32> {
+        let n = self.components.len();
+        let graph = self.graph();
+        let idx: BTreeMap<&str, usize> = self
+            .components
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id.as_str(), i))
+            .collect();
+        let mut providers_of: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (ci, c) in self.components.iter().enumerate() {
+            for imp in &c.imports {
+                for prov in graph.providers(imp) {
+                    if let Some(&pi) = idx.get(prov.as_str()) {
+                        if pi != ci {
+                            providers_of[ci].push(pi);
+                        }
+                    }
+                }
+            }
+        }
+        let order = self.boot_order().unwrap_or_else(|_| (0..n).collect());
+        let mut depth = vec![0u32; n];
+        for &i in &order {
+            depth[i] = providers_of[i]
+                .iter()
+                .map(|&p| depth[p] + 1)
+                .max()
+                .unwrap_or(0);
+        }
+        depth
+    }
 }
 
 /// Reject a system whose components don't have unique ids. Duplicates would

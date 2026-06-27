@@ -136,6 +136,46 @@ fn random_differs_across_rounds() {
 }
 
 #[test]
+fn schedule_priority_orders_independent_components() {
+    // Two independent components (no provider→consumer edge → same depth). The
+    // higher-priority one (lower number) runs first within the cycle, observable in
+    // the launched order. Topo order alone would list them by index.
+    let dir = std::env::temp_dir().join("aiueos-prio-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("c.wat"),
+        r#"(module (func (export "tick") (result i64) (i64.const 1)))"#,
+    )
+    .unwrap();
+    // :low declared first (index 0) but priority 100; :high second, priority 1.
+    let low = Manifest::parse_str(&format!(
+        r#"{{:aiueos/component :driver/low :aiueos/kind :driver :aiueos/wasm "{}"
+            :aiueos/entry "tick" :aiueos/schedule {{:priority 100}}}}"#,
+        dir.join("c.wat").display()
+    ))
+    .unwrap();
+    let high = Manifest::parse_str(&format!(
+        r#"{{:aiueos/component :driver/high :aiueos/kind :driver :aiueos/wasm "{}"
+            :aiueos/entry "tick" :aiueos/schedule {{:priority 1}}}}"#,
+        dir.join("c.wat").display()
+    ))
+    .unwrap();
+    let sys = System::from_manifests("prio", vec![low, high]);
+    let broker = Broker::new(Policy::default(), scratch_audit("aiueos-prio.edn"));
+    let report = broker.boot(&sys, Path::new(".")).expect("boots");
+    let order: Vec<&str> = report
+        .launched
+        .iter()
+        .map(|o| o.component.as_str())
+        .collect();
+    assert_eq!(
+        order,
+        vec!["driver/high", "driver/low"],
+        "the higher-priority (lower number) component runs first"
+    );
+}
+
+#[test]
 fn schedule_period_skips_off_cycles() {
     // Two components: one default (every cycle), one with :period-ms 2 (cycle-ms
     // default 1 → period_cycles 2). Over 3 cycles (0,1,2) the period-2 node runs
