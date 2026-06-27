@@ -230,10 +230,17 @@ impl Broker {
         let empty = std::collections::BTreeSet::new();
         let mut bus = TopicBus::new();
         let mut reports = Vec::with_capacity(rounds.max(1));
-        for _round in 0..rounds.max(1) {
+        for cycle in 0..rounds.max(1) {
             let mut launched = Vec::new();
             for &i in &order {
                 let m = &system.components[i];
+                // Cooperative scheduler (ADR-0006): a component is *released* only
+                // on cycles its period is due — `period_cycles = 1` (the default)
+                // runs every cycle. Released components keep their topological order
+                // (a provider before its consumer), so dataflow stays correct.
+                if (cycle as u64) % m.schedule.period_cycles != 0 {
+                    continue;
+                }
                 let base = &system.bases[i];
                 if m.source.is_none() && m.wasm.is_none() {
                     // A pure manifest with no code is a declaration-only/resident

@@ -136,6 +136,54 @@ fn random_differs_across_rounds() {
 }
 
 #[test]
+fn schedule_period_skips_off_cycles() {
+    // Two components: one default (every cycle), one with :period-ms 2 (cycle-ms
+    // default 1 → period_cycles 2). Over 3 cycles (0,1,2) the period-2 node runs
+    // on cycles 0 and 2 only; the default node runs all three.
+    let dir = std::env::temp_dir().join("aiueos-sched-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("c.wat"),
+        r#"(module (func (export "tick") (result i64) (i64.const 1)))"#,
+    )
+    .unwrap();
+    let every = Manifest::parse_str(&format!(
+        r#"{{:aiueos/component :driver/every :aiueos/kind :driver :aiueos/wasm "{}"
+            :aiueos/entry "tick"}}"#,
+        dir.join("c.wat").display()
+    ))
+    .unwrap();
+    let half = Manifest::parse_str(&format!(
+        r#"{{:aiueos/component :driver/half :aiueos/kind :driver :aiueos/wasm "{}"
+            :aiueos/entry "tick" :aiueos/schedule {{:period-ms 2}}}}"#,
+        dir.join("c.wat").display()
+    ))
+    .unwrap();
+    let sys = System::from_manifests("sched", vec![every, half]);
+    let broker = Broker::new(Policy::default(), scratch_audit("aiueos-sched.edn"));
+    let reports = broker
+        .boot_rounds(&sys, Path::new("."), 3)
+        .expect("3 cycles");
+
+    let ran =
+        |r: &aiueos::broker::BootReport, id: &str| r.launched.iter().any(|o| o.component == id);
+    // cycle 0: both; cycle 1: only the every-cycle node; cycle 2: both again.
+    assert!(ran(&reports[0], "driver/half") && ran(&reports[0], "driver/every"));
+    assert!(
+        !ran(&reports[1], "driver/half"),
+        "period-2 node skips cycle 1"
+    );
+    assert!(
+        ran(&reports[1], "driver/every"),
+        "every-cycle node still runs"
+    );
+    assert!(
+        ran(&reports[2], "driver/half"),
+        "period-2 node runs cycle 2"
+    );
+}
+
+#[test]
 fn clock_advances_across_rounds() {
     // clock() returns the control-loop cycle, so across 3 rounds it reads 0,1,2.
     let dir = std::env::temp_dir().join("aiueos-clock-test");

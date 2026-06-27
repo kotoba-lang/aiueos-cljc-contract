@@ -99,11 +99,16 @@ fn audit_missing_log_reports_empty_and_exits_zero() {
 fn audit_replays_a_populated_log() {
     // `verify` writes a grant entry to <manifest-dir>/.aiueos/audit.edn; replay it
     // and check the populated-log formatting (header + ts/event/component/detail).
-    let manifest = write(
-        "auditme.edn",
+    // ISOLATED dir so a parallel test can't truncate the shared audit log mid-test.
+    let dir = std::env::temp_dir().join("aiueos-cli-auditreplay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = dir.join("auditme.edn");
+    std::fs::write(
+        &manifest,
         "{:aiueos/component :app/auditme :aiueos/kind :app :aiueos/imports #{:log/write}}",
-    );
-    let log = scratch(".aiueos/audit.edn");
+    )
+    .unwrap();
+    let log = dir.join(".aiueos/audit.edn");
     let _ = std::fs::remove_file(&log);
     let (vc, _o, _e) = aiueos(&["verify", manifest.to_str().unwrap()]);
     assert_eq!(vc, 0, "verify writes an audit entry");
