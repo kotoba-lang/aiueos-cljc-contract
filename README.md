@@ -206,8 +206,29 @@ $BIN hash mydriver.wasm            # → <sha256>  mydriver.wasm
 # in the manifest:  :aiueos/wasm "mydriver.wasm"  :aiueos/wasm-sha256 "<sha256>"
 ```
 
-This is *integrity*, not *authenticity* — signed manifests / provenance are a
-later phase (see [`SECURITY.md`](SECURITY.md)).
+This is *integrity*. **Authenticity** is also available: `aiueos sign` an
+ed25519 signature over the `(id, hash)` binding, register the public key in the
+policy's `:aiueos/signers`, and a valid signature elevates the component to
+`:verified` (see [`SECURITY.md`](SECURITY.md) and [ADR-0003](90-docs/adr/0003-signed-manifests.md)).
+
+### Code as data: admitting agent-written components
+
+aiueos is built to run components an **AI agent emits at runtime**. `aiueos admit`
+is the front door: it runs a submitted component through the gate with its trust
+**floored to `:ai-generated`** — the agent *cannot grant itself trust* (a human
+signature can still elevate it). It returns a structured verdict an agent loop
+reads to iterate:
+
+```bash
+$BIN admit generated.edn --edn
+# admitted:   {:aiueos/admitted true  :aiueos/result 42}
+# rejected:   {:aiueos/admitted false :aiueos/reason-code :denied :aiueos/reason "..."}
+```
+
+The stable `:aiueos/reason-code` (`:denied` / `:unsafe` / `:run` / …) lets the
+agent branch on *why* without parsing prose — drop a forbidden capability, fix an
+escape hatch, or fix the logic — and resubmit. See
+[ADR-0004](90-docs/adr/0004-code-as-data-admit.md).
 
 ## Example: a virtio-blk driver
 

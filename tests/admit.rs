@@ -111,3 +111,55 @@ fn admit_rejects_a_runtime_trap_with_a_reason() {
     );
     assert!(outcome.reason.is_some(), "a trap carries a reason");
 }
+
+#[test]
+fn agent_loop_iterates_on_reason_codes_until_admitted() {
+    // The worked code-as-data loop (ADR-0004): an "agent" submits candidate
+    // components; on each rejection it reads the reason_code and "regenerates" the
+    // next candidate, until one is admitted. Here three hand-written stand-ins for
+    // LLM output show the two failure modes then success.
+    let dir = tmpdir();
+    std::fs::write(
+        dir.join("good.wat"),
+        r#"(module (func (export "main") (result i64) (i64.const 42)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("trap.wat"),
+        r#"(module (func (export "main") (result i64) (unreachable)))"#,
+    )
+    .unwrap();
+
+    // Candidates the agent tries in order.
+    let candidates = [
+        // 1. over-reaches: claims :trusted + a :network effect → floored to
+        //    :ai-generated → :denied.
+        r#"{:aiueos/component :agent/c :aiueos/kind :app :aiueos/trust :trusted
+            :aiueos/wasm "good.wat" :aiueos/entry "main" :aiueos/effects #{:network}}"#,
+        // 2. drops the effect, but the generated code traps → :run.
+        r#"{:aiueos/component :agent/c :aiueos/kind :app :aiueos/wasm "trap.wat"
+            :aiueos/entry "main"}"#,
+        // 3. fixes the logic → admitted.
+        r#"{:aiueos/component :agent/c :aiueos/kind :app :aiueos/wasm "good.wat"
+            :aiueos/entry "main"}"#,
+    ];
+
+    let broker = broker();
+    let mut seen_codes = Vec::new();
+    let mut admitted = None;
+    for src in candidates {
+        let m = Manifest::parse_str(src).unwrap();
+        let g = CapabilityGraph::build(std::slice::from_ref(&m));
+        let outcome = broker.admit(&m, &dir, &g);
+        if outcome.admitted {
+            admitted = outcome.result;
+            break;
+        }
+        seen_codes.push(outcome.reason_code.unwrap());
+    }
+
+    // The agent observed the two distinct failure modes, then succeeded — driving
+    // the loop purely off the machine-readable reason codes.
+    assert_eq!(seen_codes, vec!["denied", "run"]);
+    assert_eq!(admitted, Some(42));
+}
