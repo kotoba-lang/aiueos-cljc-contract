@@ -61,6 +61,7 @@ pub mod graph;
 pub mod manifest;
 pub mod policy;
 pub mod safe;
+pub mod surface;
 pub mod topic;
 
 #[cfg(feature = "wasm-runtime")]

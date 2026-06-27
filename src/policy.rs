@@ -215,7 +215,13 @@ impl Policy {
         match edn::get(v, "aiueos", "surface") {
             None => {}
             Some(k) if k.as_keyword().is_some() => {
-                p.surface = k.as_keyword().map(|kw| kw.name().to_string())
+                let id = k.as_keyword().unwrap().name().to_string();
+                if !crate::surface::is_known(&id) {
+                    return Err(Schema(format!(
+                        "policy: unknown :aiueos/surface `{id}` (known: robot, browser, cloud)"
+                    )));
+                }
+                p.surface = Some(id);
             }
             Some(_) => return Err(Schema("policy: :aiueos/surface must be a keyword".into())),
         }
@@ -228,9 +234,17 @@ impl Policy {
         Policy::from_edn(&v)
     }
 
-    /// Capabilities available to `m`: kernel primitives ∪ explicit grants.
+    /// Capabilities available to `m`: kernel primitives ∪ explicit grants. With an
+    /// active surface (ADR-0005), the kernel primitives are restricted to those the
+    /// surface can actually back — an import that maps to an *unoffered* kernel cap
+    /// becomes `unresolved-capability` (the host refuses to provide what this
+    /// surface shouldn't). Explicit grants are never surface-gated.
     fn granted_to(&self, m: &Manifest) -> BTreeSet<String> {
-        let mut s = self.kernel_caps.clone();
+        let mut s: BTreeSet<String> =
+            match self.surface.as_deref().and_then(crate::surface::offered) {
+                Some(offered) => self.kernel_caps.intersection(&offered).cloned().collect(),
+                None => self.kernel_caps.clone(),
+            };
         if let Some(extra) = self.grants.get(&m.id) {
             s.extend(extra.iter().cloned());
         }

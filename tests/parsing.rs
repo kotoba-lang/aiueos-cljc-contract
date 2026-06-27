@@ -484,11 +484,44 @@ fn surface_gate_denies_a_mismatched_component() {
 }
 
 #[test]
-fn policy_rejects_non_keyword_surface() {
+fn policy_rejects_non_keyword_or_unknown_surface() {
+    // non-keyword
     assert!(matches!(
         Policy::from_edn(&kotoba_edn::parse(r#"{:aiueos/surface "robot"}"#).unwrap()),
         Err(AiueosError::Schema(_))
     ));
+    // unknown surface id (so its offered set would be undefined)
+    assert!(matches!(
+        Policy::from_edn(&kotoba_edn::parse("{:aiueos/surface :teapot}").unwrap()),
+        Err(AiueosError::Schema(_))
+    ));
+}
+
+#[test]
+fn surface_restricts_kernel_caps_to_the_offered_set() {
+    use aiueos::graph::CapabilityGraph;
+    use aiueos::policy::{self, ViolationKind};
+    // A component importing :topic/publish (a kernel cap). Under :robot it
+    // resolves (robot offers topic/publish); under :browser it does NOT (browser
+    // offers no topic bus) → unresolved-capability.
+    let m = Manifest::parse_str(
+        "{:aiueos/component :app/pub :aiueos/kind :app :aiueos/imports #{:topic/publish}}",
+    )
+    .unwrap();
+    let g = CapabilityGraph::build(std::slice::from_ref(&m));
+
+    let robot = Policy::from_edn(&kotoba_edn::parse("{:aiueos/surface :robot}").unwrap()).unwrap();
+    assert!(
+        policy::verify_component(&m, &g, &robot).is_ok(),
+        "robot offers topic/publish"
+    );
+
+    let browser =
+        Policy::from_edn(&kotoba_edn::parse("{:aiueos/surface :browser}").unwrap()).unwrap();
+    let vs = policy::verify_component(&m, &g, &browser).expect_err("browser offers no topic bus");
+    assert!(vs
+        .iter()
+        .any(|v| v.kind == ViolationKind::UnresolvedCapability));
 }
 
 #[test]
