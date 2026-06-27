@@ -6,7 +6,7 @@
 
 use aiueos::audit::AuditLog;
 use aiueos::broker::Broker;
-use aiueos::graph::CapabilityGraph;
+use aiueos::graph::{CapabilityGraph, System};
 use aiueos::manifest::Manifest;
 use aiueos::policy::Policy;
 use aiueos::signing::{verify, SigStatus};
@@ -287,4 +287,42 @@ fn malformed_crypto_input_errors_without_panicking() {
             "malformed signer key `{bad_key}` must error"
         );
     }
+}
+
+#[test]
+fn require_signed_system_denies_when_any_component_is_unsigned() {
+    // A require-signed deployment verifying a whole system: an all-signed system
+    // passes; adding one unsigned component makes verify_system deny.
+    let key = keypair();
+    let sig = key.sign(b"app/signed\nabc");
+    let signed = Manifest::parse_str(&format!(
+        r#"{{:aiueos/component :app/signed :aiueos/kind :app :aiueos/wasm-sha256 "abc"
+            :aiueos/signer "alice" :aiueos/signature "{}"}}"#,
+        hex(&sig.to_bytes())
+    ))
+    .unwrap();
+    let policy_src = format!(
+        "{{:aiueos/require-signed true :aiueos/signers {{:alice \"{}\"}}}}",
+        hex(key.verifying_key().as_bytes())
+    );
+    let policy = Policy::from_edn(&kotoba_edn::parse(&policy_src).unwrap()).unwrap();
+
+    // all components signed → the system verifies
+    let ok_sys = System::from_manifests("signed-sys", vec![signed.clone()]);
+    let broker = Broker::new(
+        policy,
+        AuditLog::new(std::env::temp_dir().join("aiueos-reqsys.edn")),
+    );
+    assert!(
+        broker.verify_system(&ok_sys).is_ok(),
+        "all-signed system passes"
+    );
+
+    // add an unsigned component → the whole system is denied under require-signed
+    let unsigned = Manifest::parse_str("{:aiueos/component :app/plain :aiueos/kind :app}").unwrap();
+    let mixed = System::from_manifests("mixed-sys", vec![signed, unsigned]);
+    assert!(
+        broker.verify_system(&mixed).is_err(),
+        "an unsigned component fails the require-signed system"
+    );
 }
