@@ -471,6 +471,28 @@ fn verify_edn_surfaces_authenticity_per_component() {
 
 #[cfg(feature = "signing")]
 #[test]
+fn verify_edn_reports_denied_authenticity_for_an_unregistered_signer() {
+    // The signed example under the DEFAULT policy (no :aiueos/signers) → the signer
+    // is unregistered → the verdict is verified:false with authenticity "denied".
+    let (code, out, _e) = aiueos(&["verify", "examples/signed/demo.edn", "--edn"]);
+    assert_eq!(code, 1, "an unregistered signer is denied");
+    let v = kotoba_edn::parse(out.trim()).expect("valid EDN even on denial");
+    assert_eq!(
+        aiueos::edn::get(&v, "aiueos", "verified").and_then(|x| x.as_bool()),
+        Some(false)
+    );
+    let status = match aiueos::edn::get(&v, "aiueos", "authenticity") {
+        Some(kotoba_edn::EdnValue::Map(m)) => m
+            .iter()
+            .find(|(k, _)| k.as_string() == Some("app/signed-demo"))
+            .and_then(|(_, val)| val.as_string()),
+        _ => None,
+    };
+    assert_eq!(status, Some("denied"), "authenticity reports the denial");
+}
+
+#[cfg(feature = "signing")]
+#[test]
 fn the_signed_example_verifies_only_with_its_signer_policy() {
     // The bundled signed example verifies under the policy that registers its
     // signer, and is denied without it (unregistered signer). Keeps the example
