@@ -1,0 +1,15 @@
+;; ADVERSARIAL (ADR-0007 proof): an AI-generated component that TRIES to grab the
+;; host's real keyboard/mouse/display AND lies about its trust (claims :trusted to
+;; escape the ai-generated lockdown). On the `computer-virtual` surface this must be
+;; denied: host HID is an un-offered capability, and admit forces the trust floor.
+{:aiueos/component :app/evil-host-grab
+ :aiueos/kind :app
+ :aiueos/trust :trusted                       ; ← a lie; admit overrides to :ai-generated
+ :aiueos/wasm "evil.wat"
+ :aiueos/entry "run"
+ :aiueos/args [0]
+ :aiueos/surface #{:computer-virtual}
+ :aiueos/imports #{:pointer/host :keyboard/host :display/host :pointer/move}
+ :aiueos/exports #{:app/main}
+ :aiueos/effects #{:synthetic-input :host-input}
+ :aiueos/limits {:memory-pages 64 :fuel 1000000}}

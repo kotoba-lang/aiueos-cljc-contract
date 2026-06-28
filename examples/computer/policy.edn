@@ -1,0 +1,35 @@
+;; Policy for the isolated computer-use deployment (ADR-0007). It names the active
+;; surface, backs the virtual computer-use capabilities, scopes the network to the
+;; QA target, and forbids the host-input effect for untrusted/AI-generated code.
+{:aiueos/policy :computer-use
+
+ ;; the surface this deployment runs — the host-isolated virtual screen.
+ ;; (`computer:vm` for GPU-accurate runs; `computer:host` would require a SIGNED,
+ ;;  :verified component and is deliberately not selected here.)
+ :aiueos/surface :computer-virtual
+
+ ;; kernel primitives this deployment exposes (unioned with defaults, then
+ ;; intersected with what the surface actually offers — ADR-0005 granted_to).
+ :aiueos/kernel-caps #{:display/frame :pointer/move :pointer/click
+                       :keyboard/key :keyboard/type}
+
+ ;; net/fetch is attenuated to an origin allow-list (the surface analogue of
+ ;; per-topic TopicAccess). The agent can reach the QA target and nothing else;
+ ;; any other origin traps and is audited.
+ :aiueos/net-allow #{"isekai.network" "localhost" "127.0.0.1"}
+
+ ;; per-component grants — the computer-use agent gets the scoped fetch.
+ :aiueos/grants
+ {:app/computer-use #{:net/fetch}}
+
+ ;; effects forbidden per trust level. NOTE: the built-in :ai-generated lockdown
+ ;; forbids :network outright; this QA deployment DELIBERATELY lifts that blanket
+ ;; ban and replaces it with origin-scoped attenuation (:aiueos/net-allow above) —
+ ;; network is re-enabled, but only to the allow-listed origins, audited. :secrets
+ ;; and :persistent-write stay forbidden. :host-input (host keyboard/mouse/display)
+ ;; is forbidden for AI-generated AND untrusted, so a manifest that declares it is a
+ ;; ForbiddenEffect denial BEFORE launch — belt-and-suspenders to the surface simply
+ ;; offering no host-HID provider at all.
+ :aiueos/forbid
+ {:ai-generated #{:secrets :persistent-write :host-input}
+  :untrusted    #{:secrets :host-input}}}

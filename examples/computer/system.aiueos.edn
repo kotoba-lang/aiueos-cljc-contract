@@ -1,0 +1,10 @@
+;; An isolated computer-use system (ADR-0007): one AI-generated agent that drives a
+;; VIRTUAL screen. Boot on the host-isolated surface:
+;;   aiueos up examples/computer/system.aiueos.edn --surface computer:virtual \
+;;             --policy examples/computer/policy.edn
+;; Inspect what the surface backs (the host HID is NOT in the offered set):
+;;   aiueos surface inspect computer:virtual
+;; Admit the agent code as data (forces :ai-generated, returns a verdict to loop on):
+;;   aiueos admit examples/computer/computer-use.edn --policy examples/computer/policy.edn
+{:aiueos/system :computer-use
+ :aiueos/components ["computer-use.edn"]}

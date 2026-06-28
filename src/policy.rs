@@ -71,6 +71,10 @@ pub struct Policy {
     /// `:aiueos/surface` — the active deployment surface (ADR-0005). A component
     /// pinned to other surfaces is denied. `None` = unspecified (no surface gate).
     pub surface: Option<String>,
+    /// `:aiueos/net-allow` — origin allow-list scoping `net/fetch` (ADR-0007). The
+    /// network capability is attenuated to these origins; the surface's fetch
+    /// provider traps any other host. Empty = no extra scoping declared.
+    pub net_allow: BTreeSet<String>,
 }
 
 impl Default for Policy {
@@ -114,6 +118,7 @@ impl Default for Policy {
             signers: BTreeMap::new(),
             require_signed: false,
             surface: None,
+            net_allow: BTreeSet::new(),
         }
     }
 }
@@ -134,6 +139,7 @@ impl Policy {
             "signers",
             "require-signed",
             "surface",
+            "net-allow",
         ];
         if let Some(map) = v.as_map() {
             let mut unknown: Vec<String> = map
@@ -218,12 +224,16 @@ impl Policy {
                 let id = k.as_keyword().unwrap().name().to_string();
                 if !crate::surface::is_known(&id) {
                     return Err(Schema(format!(
-                        "policy: unknown :aiueos/surface `{id}` (known: robot, browser, cloud)"
+                        "policy: unknown :aiueos/surface `{id}` (known: robot, browser, cloud, \
+                         computer-virtual, computer-vm, computer-host)"
                     )));
                 }
                 p.surface = Some(id);
             }
             Some(_) => return Err(Schema("policy: :aiueos/surface must be a keyword".into())),
+        }
+        for o in edn::str_collection(edn::get(v, "aiueos", "net-allow")) {
+            p.net_allow.insert(o);
         }
         Ok(p)
     }
