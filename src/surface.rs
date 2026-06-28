@@ -101,13 +101,68 @@ impl Surface {
         )
     }
 
+    /// The computer-use surface family (ADR-0007): a VIRTUAL screen + synthetic
+    /// input. `display/frame` captures the framebuffer; pointer/keyboard providers
+    /// emit synthetic input INTO the virtual surface. The safety property is what it
+    /// does NOT offer — no `pointer/host` / `keyboard/host` / `display/host` provider
+    /// — so a computer-use component cannot reach the operator's real HID: calling one
+    /// resolves to `unresolved-capability` (loud denial), by construction. The backing
+    /// is a host-isolated virtual display (Xvfb container / microVM), bound in
+    /// `src/host.rs` like every other provider.
+    pub fn computer_virtual() -> Surface {
+        Surface::of(
+            "computer-virtual",
+            &[
+                p("frame", "display/frame"),
+                p("pointer-move", "pointer/move"),
+                p("pointer-click", "pointer/click"),
+                p("key", "keyboard/key"),
+                p("type", "keyboard/type"),
+                p("fetch", "net/fetch"),
+                p("log", "log/write"),
+                p("clock", "clock/monotonic"),
+            ],
+        )
+    }
+
+    /// Same capability surface as `computer_virtual`, backed by a microVM with
+    /// virtio-gpu for GPU-accurate rendering. A component moves between `:virtual`
+    /// and `:vm` unchanged — only the backing (and fidelity) differs.
+    pub fn computer_vm() -> Surface {
+        Surface {
+            id: "computer-vm".to_string(),
+            providers: Surface::computer_virtual().providers,
+        }
+    }
+
+    /// The opt-in escape hatch: drives the host's REAL desktop. Offers the host-HID
+    /// providers ON TOP of the virtual ABI. Reaching it requires a signed
+    /// (`:verified`) component plus an explicit policy surface — never the default for
+    /// `:ai-generated`. Choosing the real desktop is deliberate, vouched, and audited
+    /// (ADR-0007 §3).
+    pub fn computer_host() -> Surface {
+        let mut s = Surface::computer_virtual();
+        s.id = "computer-host".to_string();
+        for pr in [
+            p("pointer-host", "pointer/host"),
+            p("keyboard-host", "keyboard/host"),
+            p("display-host", "display/host"),
+        ] {
+            s.providers.insert(pr.name.to_string(), pr);
+        }
+        s
+    }
+
     /// Look up a known surface by id, or `None` for an id aiueos doesn't know.
-    /// Keep the arms in sync with the ADR-0005 table.
+    /// Keep the arms in sync with the ADR-0005 / ADR-0007 tables.
     pub fn by_id(id: &str) -> Option<Surface> {
         Some(match id {
             "robot" => Surface::robot(),
             "browser" => Surface::browser(),
             "cloud" => Surface::cloud(),
+            "computer-virtual" => Surface::computer_virtual(),
+            "computer-vm" => Surface::computer_vm(),
+            "computer-host" => Surface::computer_host(),
             _ => return None,
         })
     }
@@ -228,6 +283,31 @@ mod tests {
         assert!(Surface::robot().provider("dom/render").is_none());
         assert!(Surface::browser().provider("pci/config").is_none());
         assert!(Surface::cloud().provider("dom/event").is_none());
+    }
+
+    #[test]
+    fn computer_virtual_backs_synthetic_input_but_not_the_host_hid() {
+        // ADR-0007: the virtual computer-use surface backs synthetic input on a
+        // virtual screen, and DELIBERATELY offers no provider for the host's real
+        // keyboard/mouse/display — so a computer-use component cannot take over the
+        // operator's machine; the missing providers are an unresolved-capability
+        // denial, not a no-op.
+        let v = Surface::computer_virtual();
+        assert!(v.provider("pointer/move").is_some());
+        assert!(v.provider("keyboard/type").is_some());
+        assert!(v.provider("display/frame").is_some());
+        assert!(v.provider("pointer/host").is_none());
+        assert!(v.provider("keyboard/host").is_none());
+        assert!(v.provider("display/host").is_none());
+        // computer-vm carries the same capability surface (only the backing differs).
+        assert_eq!(Surface::computer_vm().offered(), v.offered());
+        // Only the signed escape-hatch surface offers the real host HID.
+        let h = Surface::computer_host();
+        assert!(h.provider("pointer/host").is_some());
+        assert!(h.provider("pointer/move").is_some());
+        assert!(
+            is_known("computer-virtual") && is_known("computer-vm") && is_known("computer-host")
+        );
     }
 
     #[test]

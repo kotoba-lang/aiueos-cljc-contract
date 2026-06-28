@@ -45,6 +45,26 @@ pub fn kw_collection(v: Option<&EdnValue>) -> Vec<String> {
     out
 }
 
+/// Like `kw_collection`, but accepts either strings (`"isekai.network"`) or
+/// keywords (`:isekai.network`) — for open allow-lists such as `:aiueos/net-allow`.
+pub fn str_collection(v: Option<&EdnValue>) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(v) = v else { return out };
+    let items: Vec<&EdnValue> = match v {
+        EdnValue::Set(s) => s.iter().collect(),
+        EdnValue::Vector(xs) | EdnValue::List(xs) => xs.iter().collect(),
+        _ => return out,
+    };
+    for it in items {
+        if let Some(s) = scalar_string(it) {
+            out.push(s);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Read a string-valued map entry.
 pub fn get_str(m: &EdnValue, ns: &str, name: &str) -> Option<String> {
     get(m, ns, name).and_then(|v| v.as_string().map(|s| s.to_string()))

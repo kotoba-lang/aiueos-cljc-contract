@@ -1,0 +1,28 @@
+;; A computer-use agent component (ADR-0007). It drives a VIRTUAL screen — captures
+;; the framebuffer and emits synthetic pointer/keyboard input — and CANNOT touch the
+;; host. It imports only the virtual computer-use ABI; it does NOT import
+;; :pointer/host / :keyboard/host / :display/host, so on the `computer` surface those
+;; resolve to no provider (`unresolved-capability`) — the host HID is unreachable by
+;; construction, not by a runtime check. `aiueos admit` forces :ai-generated anyway,
+;; so this code can never grant itself trust.
+{:aiueos/component :app/computer-use
+ :aiueos/kind :app
+ :aiueos/trust :ai-generated
+ :aiueos/wasm "computer_use.wat"
+ :aiueos/entry "run"
+ :aiueos/args [0]
+
+ ;; surfaces this agent is built for — the isolated ones. NEVER :computer:host
+ ;; (that is the signed, opt-in escape hatch; see policy + ADR-0007 §3).
+ :aiueos/surface #{:computer-virtual :computer-vm}
+
+ ;; capability wiring — the virtual computer-use ABI + a scoped fetch.
+ :aiueos/imports #{:display/frame
+                   :pointer/move :pointer/click
+                   :keyboard/key :keyboard/type
+                   :net/fetch
+                   :clock/monotonic :log/write}
+ :aiueos/exports #{:app/main}
+ :aiueos/effects #{:display-capture :synthetic-input :network}
+
+ :aiueos/limits {:memory-pages 128 :fuel 50000000}}
