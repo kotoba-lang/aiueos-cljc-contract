@@ -1124,6 +1124,87 @@ impl crate::surface::Provider {
                 )
                 .map(|_| true)
                 .map_err(run_err),
+
+            // ── the computer-use surface providers (ADR-0007) ──────────────────
+            // A VIRTUAL screen + synthetic input. Phase-0 keeps them in-process and
+            // deterministic (the audit ledger IS the record of what the agent did),
+            // exactly like `input-event` / `fb-present` — a testable provider before
+            // the real Xvfb-container / microVM backing. Each is gated identically;
+            // there is deliberately NO `pointer-host` / `keyboard-host` /
+            // `display-host` provider here, so a computer-use component can never
+            // reach the operator's real HID (those names hit the `_` arm = unbound).
+            "frame" => linker
+                .func_wrap(
+                    "aiueos:host",
+                    "frame",
+                    |mut c: Caller<'_, HostCtx>| -> anyhow::Result<i64> {
+                        gate(c.data(), "display/frame", "frame")?;
+                        let d = c.data_mut();
+                        charge(d, Charge::Call)?;
+                        let id = d.calls as i64; // monotonic framebuffer handle
+                        note(d, format!("aiueos:host/frame id={id}"));
+                        Ok(id)
+                    },
+                )
+                .map(|_| true)
+                .map_err(run_err),
+            "pointer-move" => linker
+                .func_wrap(
+                    "aiueos:host",
+                    "pointer-move",
+                    |mut c: Caller<'_, HostCtx>, x: i32, y: i32| -> anyhow::Result<()> {
+                        gate(c.data(), "pointer/move", "pointer-move")?;
+                        let d = c.data_mut();
+                        charge(d, Charge::Call)?;
+                        note(d, format!("aiueos:host/pointer-move x={x} y={y}"));
+                        Ok(())
+                    },
+                )
+                .map(|_| true)
+                .map_err(run_err),
+            "pointer-click" => linker
+                .func_wrap(
+                    "aiueos:host",
+                    "pointer-click",
+                    |mut c: Caller<'_, HostCtx>, button: i32| -> anyhow::Result<()> {
+                        gate(c.data(), "pointer/click", "pointer-click")?;
+                        let d = c.data_mut();
+                        charge(d, Charge::Call)?;
+                        note(d, format!("aiueos:host/pointer-click button={button}"));
+                        Ok(())
+                    },
+                )
+                .map(|_| true)
+                .map_err(run_err),
+            "key" => linker
+                .func_wrap(
+                    "aiueos:host",
+                    "key",
+                    |mut c: Caller<'_, HostCtx>, code: i32| -> anyhow::Result<()> {
+                        gate(c.data(), "keyboard/key", "key")?;
+                        let d = c.data_mut();
+                        charge(d, Charge::Call)?;
+                        note(d, format!("aiueos:host/key code={code}"));
+                        Ok(())
+                    },
+                )
+                .map(|_| true)
+                .map_err(run_err),
+            "type" => linker
+                .func_wrap(
+                    "aiueos:host",
+                    "type",
+                    |mut c: Caller<'_, HostCtx>, ptr: i32, len: i32| -> anyhow::Result<()> {
+                        gate(c.data(), "keyboard/type", "type")?;
+                        let bytes = read_guest_bytes(&mut c, ptr, len)?;
+                        let d = c.data_mut();
+                        charge(d, Charge::Call)?;
+                        note(d, format!("aiueos:host/type bytes={}", bytes.len()));
+                        Ok(())
+                    },
+                )
+                .map(|_| true)
+                .map_err(run_err),
             _ => Ok(false),
         }
     }
@@ -1419,6 +1500,11 @@ pub fn run_with_host_restricted_with_kqe_llm_dom_cloud(
     crate::surface::Surface::robot()
         .union(&crate::surface::Surface::browser())
         .union(&crate::surface::Surface::cloud())
+        // The computer-use virtual surface (ADR-0007): frame + synthetic pointer/
+        // keyboard. Binding only makes the host imports resolvable; the gate still
+        // confers them per-component. The host-HID escape hatch (`computer_host`) is
+        // deliberately NOT installed here — its providers stay unbound by default.
+        .union(&crate::surface::Surface::computer_virtual())
         .install(&mut linker)?;
     linker
         .func_wrap(
