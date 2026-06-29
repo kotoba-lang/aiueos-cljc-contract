@@ -37,7 +37,7 @@ for await (const line of rl) {
       case "pointer-click": await page.mouse.down({ button: ["left","middle","right"][cmd.button||0] }); await page.mouse.up({ button: ["left","middle","right"][cmd.button||0] }); reply({ ok:true }); break;
       case "key":           await page.keyboard.press(KEY[cmd.code] || String.fromCharCode(cmd.code)); reply({ ok:true }); break;
       case "type":          await page.keyboard.type(cmd.text ?? ""); reply({ ok:true }); break;
-      case "frame": {       const path = cmd.path || `/tmp/aiueos-frame-${frames}.png`; const buf = await page.screenshot({ path }); frames++; reply({ ok:true, id: frames, path, bytes: buf.length }); break; }
+      case "frame": {       const dir = process.env.AIUEOS_FRAME_DIR || "/tmp"; const path = cmd.path || `${dir}/aiueos-frame-${frames}.png`; const buf = await page.screenshot({ path }); frames++; reply({ ok:true, id: frames, path, bytes: buf.length }); break; }
       case "text":          reply({ ok:true, text: (await page.evaluate(()=>document.body?.innerText||"")).slice(0,2000) }); break;
       case "close":         reply({ ok:true }); await browser.close(); process.exit(0);
       default:              reply({ ok:false, err:"unknown op "+cmd.op });

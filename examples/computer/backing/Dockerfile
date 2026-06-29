@@ -14,7 +14,9 @@ FROM mcr.microsoft.com/playwright:v1.59.0-jammy
 # Xvfb is already needed by headed runs; headless Chromium needs none, but we keep
 # the virtual framebuffer available so a fork can run headed inside the container.
 ENV AIUEOS_PW=playwright \
-    DISPLAY=:99
+    DISPLAY=:99 \
+    AIUEOS_FRAME_DIR=/out
+RUN mkdir -p /out
 
 WORKDIR /srv
 # The base image ships the browsers (/ms-playwright) but NOT the playwright npm

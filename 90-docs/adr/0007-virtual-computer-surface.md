@@ -1,7 +1,10 @@
 # ADR-0007 — The `computer` surface: capability-isolated computer-use
 
-- Status: proposed (Phase 3, builds on ADR-0005)
-- Date: 2026-06-28
+- Status: accepted — implemented (Phase 3, builds on ADR-0005)
+- Date: 2026-06-28 (implemented 2026-06-29)
+- Default backing: the **isolated Linux container** (`examples/computer/backing`).
+  Computer-use runs through the container by default; headless Playwright is a
+  dev-machine convenience, never the baseline.
 
 ## Context
 
@@ -140,20 +143,24 @@ and the provenance for any artifact (e.g. a QA screenshot CID).
 
 Boot: `aiueos up examples/computer/system.aiueos.edn --surface computer:virtual`.
 
-## Increments
+## Increments (status)
 
-1. **This ADR + `examples/computer/`** — the manifests, policy, and system graph;
-   the capability names added to the documented ABI. *(no code yet)*
-2. **`Surface::computer_virtual()`** — the providers as host-side closures over an
-   Xvfb display + synthetic X input, each calling `gate()` first; `frame` returns
-   a CID. A container recipe (OrbStack/Lima) under `examples/computer/`.
-3. **Scoped `net/fetch`** — the origin allow-list provider + `:aiueos/net-allow`
-   policy key (closed key allow-list, ADR-0003 fail-loud).
-4. **`computer:vm`** — the Parallels/QEMU microVM backing for GPU-accurate runs,
-   proving the manifest moves between `:virtual` and `:vm` unchanged.
-5. **`computer:host` behind signing** — the host `WindowServer` provider, offered
-   only to `:verified` (signed) components with an explicit policy surface, with a
-   prominent audit line. The escape hatch, made deliberate.
+1. ✅ **This ADR + `examples/computer/`** — manifests, policy, system graph; capability
+   names + `:aiueos/net-allow`. (PR #5)
+2. ✅ **`Surface::computer_virtual()`** — the host-side providers (`frame`,
+   `pointer-move`, `pointer-click`, `key`, `type`), each gated; in-process audit ledger
+   as the deterministic contract. (PR #6) The **real backing** (a daemon over a JSON-line
+   ABI) + the **`computer-backing` bridge** wiring it to `aiueos run`, with the
+   **isolated container as the default** and headless Playwright as a dev fallback.
+   (PRs #7, #8, #9) Verified end-to-end driving `https://isekai.network/gftd/orbs`
+   inside a Linux container (no host display/HID), frame captured to a mounted volume.
+3. ✅ **Scoped `net/fetch`** — `:aiueos/net-allow` origin allow-list (closed key,
+   fail-loud). (PR #5)
+4. ⏳ **`computer-vm`** — the surface is registered (offered set == `computer-virtual`);
+   the Parallels/QEMU microVM backing (GPU-accurate) is future work.
+5. ⏳ **`computer-host` behind signing** — the surface offers the host-HID providers but
+   they are intentionally **not bound** in the default linker; gating it behind a signed
+   (`:verified`) component is future work. The escape hatch stays deliberate.
 
 ## Consequences
 
