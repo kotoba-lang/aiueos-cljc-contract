@@ -17,8 +17,12 @@ import readline from "node:readline";
 const PW = process.env.AIUEOS_PW || "playwright";
 const _pw = await import(PW); const chromium = _pw.chromium ?? _pw.default?.chromium;
 const KEY = { 13: "Enter", 9: "Tab", 27: "Escape", 32: " ", 37: "ArrowLeft", 38: "ArrowUp", 39: "ArrowRight", 40: "ArrowDown", 8: "Backspace" };
-const browser = await chromium.launch({ channel: "chrome", headless: true,
-  args: ["--enable-unsafe-webgpu","--use-angle=metal","--ignore-gpu-blocklist"] });
+// AIUEOS_PW_CHANNEL=chrome uses the system Google Chrome (handy on a dev Mac);
+// unset uses Playwright's bundled Chromium (the portable default — e.g. in the
+// container image, where no system Chrome exists).
+const CHANNEL = process.env.AIUEOS_PW_CHANNEL || undefined;
+const browser = await chromium.launch({ channel: CHANNEL, headless: true,
+  args: ["--enable-unsafe-webgpu","--use-angle=metal","--ignore-gpu-blocklist","--no-sandbox"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 let frames = 0;
 const reply = (o) => process.stdout.write(JSON.stringify(o) + "\n");

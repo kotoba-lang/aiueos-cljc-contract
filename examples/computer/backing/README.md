@@ -30,10 +30,18 @@ line on stdout. Commands mirror the `aiueos:host` provider names:
 
 - **Headless Playwright (local / CI-light).** `node surface.mjs` — headless Chromium,
   no host display, no Docker. Needs `playwright` resolvable (or `AIUEOS_PW=<path>`).
-  This is what the demo below uses.
-- **Xvfb-in-container (full Linux isolation).** `Dockerfile` builds an image with a
-  virtual framebuffer; under OrbStack/Docker the container has no host HID at all.
-  `docker build -t aiueos-computer-virtual . && docker run --rm -i --init aiueos-computer-virtual < actions.jsonl`.
+  Set `AIUEOS_PW_CHANNEL=chrome` to use the system Google Chrome on a dev Mac;
+  unset uses Playwright's bundled Chromium.
+- **Xvfb-in-container (full Linux isolation, verified).** `Dockerfile` builds an image
+  with the bundled Chromium + a virtual framebuffer; under OrbStack/Docker the
+  container has **no host HID at all**.
+
+  ```sh
+  docker build -t aiueos-computer-virtual examples/computer/backing
+  mkdir -p out
+  docker run --rm -i --init -v "$PWD/out:/out" aiueos-computer-virtual < actions.jsonl
+  # → out/<frame>.png captured inside the container; the host screen is never touched.
+  ```
 
 ## Proven
 

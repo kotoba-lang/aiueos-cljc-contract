@@ -17,6 +17,9 @@ ENV AIUEOS_PW=playwright \
     DISPLAY=:99
 
 WORKDIR /srv
+# The base image ships the browsers (/ms-playwright) but NOT the playwright npm
+# package, so install it (pinned to the image's version) for `import("playwright")`.
+RUN npm init -y >/dev/null 2>&1 && npm i --no-audit --no-fund playwright@1.59.0
 COPY surface.mjs /srv/surface.mjs
 
 # Playwright base image ships the browsers + node. Run the daemon on a virtual
