@@ -1,0 +1,13 @@
+;; A computer-use agent that drives the virtual screen (ADR-0007 end-to-end demo).
+{:aiueos/component :app/computer-drive
+ :aiueos/kind :app
+ :aiueos/trust :ai-generated
+ :aiueos/wasm "drive.wat"
+ :aiueos/entry "run"
+ :aiueos/args [0]
+ :aiueos/surface #{:computer-virtual :computer-vm}
+ :aiueos/imports #{:pointer/move :pointer/click :keyboard/key :keyboard/type :display/frame
+                   :clock/monotonic :log/write}
+ :aiueos/exports #{:app/main}
+ :aiueos/effects #{:synthetic-input :display-capture}
+ :aiueos/limits {:memory-pages 16 :fuel 5000000}}

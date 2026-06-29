@@ -52,4 +52,10 @@ ed25519-dalek = { version = "2", optional = true }
 default = ["wasm-runtime", "signing"]
 wasm-runtime = ["dep:wasmtime", "dep:anyhow", "dep:sha2"]
 signing = ["dep:ed25519-dalek"]
+# `computer-backing` wires the `computer-virtual` providers (ADR-0007) to an external
+# host-side daemon (examples/computer/backing) over a JSON-line ABI, so gated/audited
+# synthetic input drives a REAL virtual screen. Off by default (and out of CI): it
+# spawns a subprocess the operator configures via AIUEOS_COMPUTER_BACKING. The
+# in-process audit ledger stays the deterministic contract when this is off.
+computer-backing = ["wasm-runtime"]
 kototama = ["wasm-runtime", "dep:kotoba-clj", "dep:kotoba-core", "dep:kotoba-datomic"]

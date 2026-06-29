@@ -65,6 +65,8 @@ pub mod surface;
 pub mod topic;
 pub mod virtio;
 
+#[cfg(feature = "computer-backing")]
+pub mod backing;
 #[cfg(feature = "wasm-runtime")]
 pub mod host;
 #[cfg(feature = "wasm-runtime")]

@@ -663,6 +663,11 @@ pub struct HostCtx {
     dom: DomSurface,
     /// Cloud-surface state for `storage/kv` + `net/fetch` (ADR-0005).
     cloud: CloudSurface,
+    /// The `computer-virtual` backing daemon (ADR-0007), lazily spawned on the first
+    /// forwarded computer-use action when `AIUEOS_COMPUTER_BACKING` is set. `None`
+    /// keeps the in-process audit ledger as the only effect (the default).
+    #[cfg(feature = "computer-backing")]
+    backing: Option<crate::backing::Backing>,
 }
 
 /// What a host-enabled run produced.
@@ -1141,7 +1146,20 @@ impl crate::surface::Provider {
                         gate(c.data(), "display/frame", "frame")?;
                         let d = c.data_mut();
                         charge(d, Charge::Call)?;
-                        let id = d.calls as i64; // monotonic framebuffer handle
+                        let id = {
+                            let base = d.calls as i64; // monotonic in-process handle
+                            #[cfg(feature = "computer-backing")]
+                            {
+                                match backing_mut(d).map(|b| b.frame()) {
+                                    Some(fid) if fid != 0 => fid, // the real daemon's frame id
+                                    _ => base,
+                                }
+                            }
+                            #[cfg(not(feature = "computer-backing"))]
+                            {
+                                base
+                            }
+                        };
                         note(d, format!("aiueos:host/frame id={id}"));
                         Ok(id)
                     },
@@ -1157,6 +1175,10 @@ impl crate::surface::Provider {
                         let d = c.data_mut();
                         charge(d, Charge::Call)?;
                         note(d, format!("aiueos:host/pointer-move x={x} y={y}"));
+                        #[cfg(feature = "computer-backing")]
+                        if let Some(b) = backing_mut(d) {
+                            b.pointer_move(x, y);
+                        }
                         Ok(())
                     },
                 )
@@ -1171,6 +1193,10 @@ impl crate::surface::Provider {
                         let d = c.data_mut();
                         charge(d, Charge::Call)?;
                         note(d, format!("aiueos:host/pointer-click button={button}"));
+                        #[cfg(feature = "computer-backing")]
+                        if let Some(b) = backing_mut(d) {
+                            b.pointer_click(button);
+                        }
                         Ok(())
                     },
                 )
@@ -1185,6 +1211,10 @@ impl crate::surface::Provider {
                         let d = c.data_mut();
                         charge(d, Charge::Call)?;
                         note(d, format!("aiueos:host/key code={code}"));
+                        #[cfg(feature = "computer-backing")]
+                        if let Some(b) = backing_mut(d) {
+                            b.key(code);
+                        }
                         Ok(())
                     },
                 )
@@ -1200,6 +1230,10 @@ impl crate::surface::Provider {
                         let d = c.data_mut();
                         charge(d, Charge::Call)?;
                         note(d, format!("aiueos:host/type bytes={}", bytes.len()));
+                        #[cfg(feature = "computer-backing")]
+                        if let Some(b) = backing_mut(d) {
+                            b.type_text(&String::from_utf8_lossy(&bytes));
+                        }
                         Ok(())
                     },
                 )
@@ -1309,6 +1343,17 @@ fn guest_alloc_bytes(c: &mut Caller<'_, HostCtx>, bytes: &[u8]) -> anyhow::Resul
 
 fn note(ctx: &mut HostCtx, event: impl Into<String>) {
     ctx.events.push(event.into());
+}
+
+/// The `computer-virtual` backing (ADR-0007), spawned lazily on first use when the
+/// operator set `AIUEOS_COMPUTER_BACKING`. `None` keeps the in-process ledger as the
+/// only effect. Feature-gated so the default build has no subprocess path at all.
+#[cfg(feature = "computer-backing")]
+fn backing_mut(ctx: &mut HostCtx) -> Option<&mut crate::backing::Backing> {
+    if ctx.backing.is_none() {
+        ctx.backing = crate::backing::Backing::from_env();
+    }
+    ctx.backing.as_mut()
 }
 
 /// Instantiate `wasm` (binary or WAT text) with the `aiueos:host` ABI bound, run
@@ -1773,6 +1818,9 @@ pub fn run_with_host_restricted_with_kqe_llm_dom_cloud(
         llm,
         dom,
         cloud,
+        // Lazily spawned on the first forwarded computer-use action (feature only).
+        #[cfg(feature = "computer-backing")]
+        backing: None,
     };
     let mut store = Store::new(&engine, ctx);
     store.limiter(|c| &mut c.limits);
