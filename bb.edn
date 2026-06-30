@@ -1,5 +1,12 @@
-{:tasks
+{:paths ["src" "test"]
+ :tasks
  {
+  test:cljc
+  {:doc "Run the pure CLJC authority contract tests."
+   :task (do
+           (require 'aiueos.contract-test)
+           (clojure.test/run-tests 'aiueos.contract-test))}
+
   linux:build
   {:doc "Build the Linux/aarch64 static aiueos /init binary."
    :task (shell "bb" "scripts/build-linux-aarch64.bb")}

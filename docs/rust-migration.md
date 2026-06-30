@@ -38,6 +38,14 @@ Host adapter only:
 - filesystem/CLI execution
 - native process lifecycle
 
+## CLJC Authority Seed
+
+`src/aiueos/contract.cljc` now defines the first pure CLJC contract for the
+shared authority layer: validators for a minimal component manifest, policy
+decision, and audit event. The contract is intentionally data-only so Rust,
+Kotoba, and other host adapters can conform to the same EDN shapes while runtime
+behavior migrates incrementally.
+
 ## Migration Steps
 
 1. Extract manifest, graph, policy, audit, topic, and broker contracts to CLJC.
@@ -47,4 +55,3 @@ Host adapter only:
 4. Generate or mechanically mirror host adapter structs from CLJC schemas.
 5. Retire the Rust crate once Kotoba-native CLI/runtime can launch the same
    component graph.
-
