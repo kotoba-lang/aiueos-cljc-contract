@@ -335,14 +335,14 @@
       (is (some #(= [:aiueos.broker/run-statuses] (:path %)) (:errors result))))))
 
 (deftest aiueos-provider-filesystem-conformance
-  (testing "policy and broker contracts no longer require Rust provider sources"
+  (testing "policy source-files name real CLJC files in this repo, not Rust in ../aiueos"
     (let [contracts [(contract/load-policy-contract)
                      (contract/load-broker-contract)]]
-      (is (every? empty?
-                  [(-> contracts first :aiueos.policy/source-files)
-                   (-> contracts second :aiueos.broker/source-files)]))
+      (is (seq (-> contracts first :aiueos.policy/source-files)))
+      (is (empty? (-> contracts second :aiueos.broker/source-files))
+          "broker admit/run-plan/run-receipt reasoning is not ported yet (ADR-2607022200 follow-up)")
       (is (= {:valid? true :errors []}
-             (contract/validate-aiueos-provider-files contracts "../aiueos"))))))
+             (contract/validate-aiueos-provider-files contracts "."))))))
 
 #?(:clj
    (deftest example-fixtures-follow-authority-contracts

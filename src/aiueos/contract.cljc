@@ -750,7 +750,8 @@
 (defn validate-policy-contract
   "Validate the EDN-owned aiueos policy tables.
 
-  Rust policy code may execute this decision model, but default capabilities,
+  `aiueos.policy` (ported from the retired Rust `policy.rs` per
+  ADR-2607022200) executes this decision model; default capabilities,
   forbiddances, decision labels, violation labels, and grant fields are owned
   here as data."
   [policy]
