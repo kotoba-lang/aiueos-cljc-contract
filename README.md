@@ -18,5 +18,6 @@ contracts as adapters/providers elsewhere, but they are not authority here.
 ## Verify
 
 ```bash
+clojure -M:test
 bb test:cljc
 ```
