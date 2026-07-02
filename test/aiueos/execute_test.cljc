@@ -111,3 +111,61 @@
          (is (= :grant (:aiueos/decision result)) component)
          (is (= 0 (:aiueos.execute/result result))
              (str component ": device-access stub must return 0 through a real Chicory call"))))))
+
+;; ───────── ADR-0006 quota enforcement: aborts a real Chicory run, not
+;; just a static check ─────────
+
+#?(:clj
+   (deftest execute-with-generous-default-quota-runs-normally
+     (testing "an unnormalized manifest (no :aiueos/quota key) falls back
+     to execute/default-quota and behaves exactly like before quota
+     enforcement existed"
+       (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+             m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{:topic/publish}}
+             result (execute/execute m empty-graph policy* topic-publish-wasm)]
+         (is (= :grant (:aiueos/decision result)))
+         (is (not (contains? result :aiueos.execute/quota-exceeded)))))))
+
+#?(:clj
+   (deftest execute-aborts-when-the-publishes-quota-is-exhausted
+     (testing "publishes quota 0 -- the component's single topic-publish
+     call is the FIRST call and already exceeds it; the run aborts
+     through a real Chicory host-function throw, not a static check"
+       (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+             m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{:topic/publish}
+                :aiueos/quota {:host-calls 1024 :publishes 0}}
+             result (execute/execute m empty-graph policy* topic-publish-wasm)]
+         (is (= :grant (:aiueos/decision result))
+             "the CAPABILITY decision is still :grant -- quota is a separate, run-time-only limit")
+         (is (not (contains? result :aiueos.execute/result))
+             "no :result -- the run aborted before main returned normally")
+         (is (= {:kind :publishes :limit 0 :count 1}
+                (:aiueos.execute/quota-exceeded result)))
+         (is (= (topic/topic-count topic/empty-bus 1) (topic/topic-count (:aiueos.execute/topic-bus result) 1))
+             "the offending call's own effect never landed -- checked before the swap!")))))
+
+#?(:clj
+   (deftest execute-aborts-when-the-host-calls-quota-is-exhausted
+     (testing "host-calls quota 0 -- the component's first host call
+     (topic-publish itself) already exceeds it, before the :publishes
+     sub-check even runs"
+       (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+             m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{:topic/publish}
+                :aiueos/quota {:host-calls 0 :publishes 256}}
+             result (execute/execute m empty-graph policy* topic-publish-wasm)]
+         (is (= :grant (:aiueos/decision result)))
+         (is (= {:kind :host-calls :limit 0 :count 1}
+                (:aiueos.execute/quota-exceeded result)))))))
+
+#?(:clj
+   (deftest execute-admission-also-enforces-quota
+     (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+           m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :ai-generated
+              :aiueos/imports #{:topic/publish}
+              :aiueos/quota {:host-calls 1024 :publishes 0}}
+           result (execute/execute-admission m empty-graph policy* topic-publish-wasm)]
+       (is (= :grant (:aiueos/decision result)))
+       (is (= :publishes (:kind (:aiueos.execute/quota-exceeded result)))))))

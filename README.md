@@ -34,6 +34,12 @@ contracts as adapters/providers elsewhere, but they are not authority here.
   `topic-*`) get real Clojure-backed host functions, the device-access quartet
   (`pci-config`/`dma-map`/`irq-subscribe`/`mmio-map`) stays a deterministic stub
   pending real hardware access (native shim or `java.lang.foreign`, unresolved).
+  Enforces `:aiueos/quota {:host-calls N :publishes N}` (ADR-0006) — a per-run
+  host-function call-count cap; exceeding it aborts the run mid-execution
+  (`:aiueos.execute/quota-exceeded`, offending call's own effect never lands).
+  **Not** instruction-level fuel metering — Chicory has no gas-metering API yet,
+  so that gap (`:aiueos/limits {:fuel N}`) stays unresolved; quota only bounds
+  *how many* host calls happen, not how much work one call does.
   **JVM-only** — needs `clojure -M:test`, not `bb` (Chicory isn't in babashka's
   class allowlist).
 - `src/aiueos/launcher.cljc` is a real, runnable CLI: the retired Rust
