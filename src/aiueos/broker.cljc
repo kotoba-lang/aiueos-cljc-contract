@@ -8,17 +8,20 @@
   `:aiueos/run-plan` / `:aiueos/run-receipt` (matching
   `aiueos.contract/validate-run-plan` / `validate-run-receipt`).
 
-  It deliberately does NOT own execution. The retired Rust broker's
-  `launch`/`launch_with_surfaces`/`boot`/`boot_rounds*`/`materialize_and_run`/
-  `compile_component_source` all required wasmtime hosting, wasm-byte file
-  I/O, and running untrusted code under fuel/memory limits — that is
-  `:provider/execute` in `resources/aiueos/broker_contract.edn`'s `:run-receipt`
-  flow, and per ADR-2607022200 it is permanently a native/host adapter
-  concern (Layer 3), never CLJC authority. `.kotoba` compiles TO Wasm; it
-  cannot itself host other Wasm components. A host adapter should: call
-  `verify-one`/`verify-admission` here, only proceed to execute on
-  `:aiueos/decision :grant`, then call `run-receipt` with the execution
-  result to shape the audited receipt.
+  This namespace itself deliberately does NOT own execution -- see
+  `aiueos.execute` for that (`:provider/execute` in
+  `resources/aiueos/broker_contract.edn`'s `:run-receipt` flow). ADR-2607022200
+  originally assumed execution was permanently native/Rust territory because
+  `.kotoba` compiles TO Wasm and cannot itself host other Wasm components;
+  ADR-2607022900 revises that for the JVM case specifically -- `aiueos.execute`
+  hosts compiled `.kotoba` Wasm via Chicory (a pure-JVM Wasm runtime), calling
+  `verify-one`/`verify-admission` from this namespace first and refusing to run
+  anything denied, same contract as before. Raw hardware access (the
+  device-access quartet) is still out of scope everywhere. A non-JVM host
+  adapter without Chicory available should: call `verify-one`/`verify-admission`
+  here (or via `aiueos.decide`'s subprocess bridge), only proceed to execute on
+  `:aiueos/decision :grant`, then call `run-receipt` with the execution result
+  to shape the audited receipt.
 
   Every function here is pure: no file I/O, no wall-clock reads. Where the
   retired Rust broker appended directly to an `AuditLog`, these functions
