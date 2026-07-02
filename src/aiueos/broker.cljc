@@ -25,7 +25,21 @@
   instead return `:aiueos.broker/audit-entries` — a vector of pure
   `aiueos.audit/audit-entry` maps — for the caller (a host adapter) to
   append via `aiueos.audit/append!`. This mirrors the pure/impure split
-  `aiueos.audit` itself already draws."
+  `aiueos.audit` itself already draws.
+
+  One retired module is deliberately NOT ported here or anywhere:
+  `aiueos/src/safe.rs`, the safe-kotoba subset gate (denies eval/require/
+  reflection/host construction before compiling `:aiueos/source`). It is
+  redundant, not merely out of scope — `kotoba-lang/kotoba`'s own
+  `kototama`/`kotoba-clj` compiler layer already owns this exact check
+  (`kotoba-lang/kotoba/src/kotoba/runtime.clj`), and `kotoba-lang/kotoba`'s
+  `ADR-kotoba-shell-aiueos-safety-clj.md` formalizes the split: kototama
+  gates the *language* (is this source safe to compile at all?), aiueos
+  gates *capabilities* over the manifest and the resulting artifact (this
+  namespace + `aiueos.policy`). A host adapter compiling `:aiueos/source`
+  should call kototama's safety gate first, then this namespace's
+  `verify-one`/`verify-admission` — porting a second denylist here would
+  duplicate, and risk drifting from, kototama's."
   (:require [clojure.string :as str]
             [aiueos.audit :as audit]
             [aiueos.graph :as graph]
