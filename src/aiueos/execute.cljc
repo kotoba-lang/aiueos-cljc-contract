@@ -149,6 +149,24 @@
      (aget ^longs (.apply (.export instance "main") (long-array 0)) 0)))
 
 #?(:clj
+   (defn- run-if-granted
+     "Shared tail of `execute`/`execute-admission`: given an already-computed
+     policy DECISION, only instantiate+run WASM-BYTES on Chicory when
+     `:aiueos/decision` is `:grant`; a `:deny` decision is returned
+     unmodified, unexecuted."
+     [decision wasm-bytes]
+     (if (= :grant (:aiueos/decision decision))
+       (let [log-atom (atom [])
+             topic-bus-atom (atom topic/empty-bus)
+             instance (instantiate wasm-bytes log-atom topic-bus-atom)
+             result (call-main instance)]
+         (assoc decision
+                :aiueos.execute/result result
+                :aiueos.execute/log @log-atom
+                :aiueos.execute/topic-bus @topic-bus-atom))
+       decision)))
+
+#?(:clj
    (defn execute
      "The end-to-end path: verify `m` (a normalized manifest) against
      `graph`/`policy` via `aiueos.broker/verify-one`; only if granted,
@@ -160,14 +178,15 @@
      the broker decision plus the execution outcome and the final log/topic
      state (inspectable, e.g. for tests or an audit trail)."
      [m graph policy wasm-bytes]
-     (let [decision (broker/verify-one m graph policy)]
-       (if (= :grant (:aiueos/decision decision))
-         (let [log-atom (atom [])
-               topic-bus-atom (atom topic/empty-bus)
-               instance (instantiate wasm-bytes log-atom topic-bus-atom)
-               result (call-main instance)]
-           (assoc decision
-                  :aiueos.execute/result result
-                  :aiueos.execute/log @log-atom
-                  :aiueos.execute/topic-bus @topic-bus-atom))
-         decision))))
+     (run-if-granted (broker/verify-one m graph policy) wasm-bytes)))
+
+#?(:clj
+   (defn execute-admission
+     "The execution half of the retired Rust `Broker::admit` (ADR-0004),
+     now actually runnable: floors `m`'s trust to `:ai-generated`
+     (`broker/floor-trust-for-admission`) before verification -- an
+     agent-submitted component can never grant itself trust -- then, only
+     if still granted after the floor, instantiates and executes WASM-BYTES
+     on Chicory exactly like `execute`. Same return shape as `execute`."
+     [m graph policy wasm-bytes]
+     (run-if-granted (broker/verify-admission m graph policy) wasm-bytes)))

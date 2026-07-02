@@ -36,6 +36,13 @@ contracts as adapters/providers elsewhere, but they are not authority here.
   pending real hardware access (native shim or `java.lang.foreign`, unresolved).
   **JVM-only** — needs `clojure -M:test`, not `bb` (Chicory isn't in babashka's
   class allowlist).
+- `src/aiueos/launcher.cljc` is a real, runnable CLI: the retired Rust
+  `bin/aiueos.rs`'s argv-parsing/file-I/O role, reimplemented as JVM Clojure.
+  Ties `aiueos.cli` + `aiueos.manifest` + `aiueos.policy`/`aiueos.broker` +
+  `aiueos.execute` together. `verify`/`run`/`admit` are wired today (`run`/`admit`
+  actually execute a granted component's declared `:aiueos/wasm`, not just decide).
+  Try it: `clojure -M -m aiueos.launcher run <manifest>.edn --edn`. **JVM-only**,
+  same reason as `aiueos.execute`.
 - `resources/aiueos/component_boundary.edn` owns the component imports/exports.
 - `resources/aiueos/policy_contract.edn` / `broker_contract.edn` own the policy/broker decision tables.
 - `resources/aiueos/cli.edn` owns the CLI command/option contract.
