@@ -37,9 +37,15 @@ contracts as adapters/providers elsewhere, but they are not authority here.
   Enforces `:aiueos/quota {:host-calls N :publishes N}` (ADR-0006) — a per-run
   host-function call-count cap; exceeding it aborts the run mid-execution
   (`:aiueos.execute/quota-exceeded`, offending call's own effect never lands).
-  **Not** instruction-level fuel metering — Chicory has no gas-metering API yet,
-  so that gap (`:aiueos/limits {:fuel N}`) stays unresolved; quota only bounds
-  *how many* host calls happen, not how much work one call does.
+  Also enforces `:aiueos/limits :fuel` (ADR-0001) — **real instruction-level
+  metering**, via Chicory's `Instance.Builder/withUnsafeExecutionListener`
+  (fires per Wasm instruction executed). Chicory has no first-class gas-metering
+  API, and this hook is explicitly documented `unsafe`/`experimental`/possibly
+  removed later (its supported execution-limit mechanism is a wall-clock
+  thread-interrupt timeout, not this) — treat fuel enforcement as a working
+  prototype on an unofficial API, not a permanent guarantee. It also only fires
+  in Chicory's interpreter path; a future switch to Chicory's AOT compiler would
+  bypass it entirely.
   **JVM-only** — needs `clojure -M:test`, not `bb` (Chicory isn't in babashka's
   class allowlist).
 - `src/aiueos/launcher.cljc` is a real, runnable CLI: the retired Rust

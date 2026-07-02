@@ -16,14 +16,26 @@
   JVM-only (`#?(:clj ...)` throughout): Chicory is a Java library, and this
   is exactly the kind of host/adapter code the rest of this repo already
   keeps `:clj`-gated (see `aiueos.signing`'s crypto, `aiueos.audit`'s file
-  I/O)."
+  I/O).
+
+  `:aiueos/limits :fuel` (ADR-0001) IS instruction-level metering, unlike
+  `:aiueos/quota`'s host-CALL count above -- via
+  `Instance.Builder/withUnsafeExecutionListener`, a real Chicory hook that
+  fires per Wasm instruction (`fuel-listener`). Chicory's own docs mark
+  this API `unsafe`/`experimental`/possibly-removed-later (its
+  *documented, supported* execution-limit mechanism is a wall-clock
+  thread-interrupt timeout, not this), and it only fires in the
+  interpreter path -- Chicory's separate AOT compiler bypasses it
+  entirely. Treat fuel enforcement here as a working prototype on an
+  unofficial API, not a permanent guarantee (ADR-2607022900 follow-up
+  2, 2026-07-02)."
   (:require [aiueos.broker :as broker]
             [aiueos.manifest :as manifest]
             [aiueos.topic :as topic]
             #?(:clj [clojure.edn :as edn]))
   #?(:clj
-     (:import (com.dylibso.chicory.runtime HostFunction ImportFunction ImportValues
-                                           Instance WasmFunctionHandle)
+     (:import (com.dylibso.chicory.runtime ExecutionListener HostFunction ImportFunction
+                                           ImportValues Instance WasmFunctionHandle)
               (com.dylibso.chicory.wasm Parser)
               (com.dylibso.chicory.wasm.types FunctionType ValType))))
 
@@ -74,6 +86,22 @@
          (throw (ex-info (str "aiueos quota exceeded: " (name kind))
                           {:aiueos.execute/quota-exceeded {:kind kind :limit limit :count n}}))
          (f)))))
+
+#?(:clj
+   (defn- fuel-listener
+     "`:aiueos/limits :fuel` (ADR-0001) enforcement: an ExecutionListener
+     that increments FUEL-ATOM on every Wasm instruction executed and
+     throws (same `:aiueos.execute/*-exceeded` ex-data convention as
+     `count-and-check!`, tagged `:aiueos.execute/fuel-exceeded`) the
+     instant it exceeds LIMIT. See the namespace docstring for why this is
+     a prototype on an unofficial Chicory API, not a permanent guarantee."
+     [fuel-atom limit]
+     (reify ExecutionListener
+       (onExecution [_ _instruction _stack]
+         (let [n (swap! fuel-atom inc)]
+           (when (> n limit)
+             (throw (ex-info "aiueos fuel exceeded"
+                              {:aiueos.execute/fuel-exceeded {:limit limit :count n}}))))))))
 
 #?(:clj
    (defn- device-access-stub
@@ -182,10 +210,12 @@
      `aiueos-host-functions`; QUOTA is a normalized `:aiueos/quota` map
      (`{:host-calls N :publishes N}`, ADR-0006) -- `has_capability` itself
      is NOT quota-counted (a link-time permission check, not a resource-
-     consuming action)."
-     [wasm-bytes log-atom topic-bus-atom quota]
+     consuming action). FUEL-LIMIT (`:aiueos/limits :fuel`, ADR-0001) is
+     wired via `fuel-listener` (see namespace docstring)."
+     [wasm-bytes log-atom topic-bus-atom quota fuel-limit]
      (let [host-calls-atom (atom 0)
            publishes-atom (atom 0)
+           fuel-atom (atom 0)
            has-capability (host-fn "has_capability" [:i32] :i32 (fn [_instance _args] 1))
            fns (concat [has-capability]
                        (aiueos-host-functions log-atom topic-bus-atom
@@ -196,7 +226,10 @@
                        (.addFunction (into-array ImportFunction fns))
                        .build)
            module (Parser/parse ^bytes wasm-bytes)]
-       (-> (Instance/builder module) (.withImportValues imports) .build))))
+       (-> (Instance/builder module)
+           (.withImportValues imports)
+           (.withUnsafeExecutionListener (fuel-listener fuel-atom fuel-limit))
+           .build))))
 
 #?(:clj
    (defn call-main
@@ -214,21 +247,39 @@
      {:host-calls manifest/default-host-calls :publishes manifest/default-quota-publishes}))
 
 #?(:clj
+   (def default-fuel
+     "Used when `m` has no `:aiueos/limits :fuel` -- same generous default
+     `normalize-limits` applies (10,000,000 Wasm instructions per run)."
+     manifest/default-fuel))
+
+#?(:clj
+   (defn- exceeded-key [e]
+     (let [d (ex-data e)]
+       (cond
+         (contains? d :aiueos.execute/quota-exceeded) [:aiueos.execute/quota-exceeded (:aiueos.execute/quota-exceeded d)]
+         (contains? d :aiueos.execute/fuel-exceeded) [:aiueos.execute/fuel-exceeded (:aiueos.execute/fuel-exceeded d)]
+         :else nil))))
+
+#?(:clj
    (defn- run-if-granted
      "Shared tail of `execute`/`execute-admission`: given an already-computed
      policy DECISION, only instantiate+run WASM-BYTES on Chicory when
      `:aiueos/decision` is `:grant`; a `:deny` decision is returned
      unmodified, unexecuted. QUOTA (`:aiueos/quota`, defaults to
-     `default-quota`) caps host-call/publish counts (ADR-0006) -- exceeding
-     it aborts the run and the result carries `:aiueos.execute/quota-exceeded`
+     `default-quota`) caps host-call/publish counts (ADR-0006); FUEL-LIMIT
+     (`:aiueos/limits :fuel`, defaults to `default-fuel`) caps Wasm
+     instructions executed (ADR-0001, prototype -- see namespace
+     docstring). Exceeding either aborts the run; the result carries
+     `:aiueos.execute/quota-exceeded` or `:aiueos.execute/fuel-exceeded`
      instead of `:aiueos.execute/result`, with whatever log/topic-bus state
-     accumulated before the abort still attached."
-     ([decision wasm-bytes] (run-if-granted decision wasm-bytes default-quota))
-     ([decision wasm-bytes quota]
+     accumulated before the abort still attached. An unrelated exception
+     still propagates uncaught."
+     ([decision wasm-bytes] (run-if-granted decision wasm-bytes default-quota default-fuel))
+     ([decision wasm-bytes quota fuel-limit]
       (if (= :grant (:aiueos/decision decision))
         (let [log-atom (atom [])
               topic-bus-atom (atom topic/empty-bus)
-              instance (instantiate wasm-bytes log-atom topic-bus-atom quota)]
+              instance (instantiate wasm-bytes log-atom topic-bus-atom quota fuel-limit)]
           (try
             (let [result (call-main instance)]
               (assoc decision
@@ -236,9 +287,9 @@
                      :aiueos.execute/log @log-atom
                      :aiueos.execute/topic-bus @topic-bus-atom))
             (catch clojure.lang.ExceptionInfo e
-              (if-let [quota-exceeded (:aiueos.execute/quota-exceeded (ex-data e))]
+              (if-let [[k v] (exceeded-key e)]
                 (assoc decision
-                       :aiueos.execute/quota-exceeded quota-exceeded
+                       k v
                        :aiueos.execute/log @log-atom
                        :aiueos.execute/topic-bus @topic-bus-atom)
                 (throw e)))))
@@ -249,17 +300,20 @@
      "The end-to-end path: verify `m` (a normalized manifest) against
      `graph`/`policy` via `aiueos.broker/verify-one`; only if granted,
      instantiate WASM-BYTES on Chicory and call its exported `main`, capped
-     by `m`'s `:aiueos/quota` (`default-quota` if `m` wasn't normalized).
+     by `m`'s `:aiueos/quota` (`default-quota` if unnormalized) and
+     `:aiueos/limits :fuel` (`default-fuel` if unnormalized).
 
      Returns `{:aiueos/decision :deny ...}` (the broker's denial, unexecuted),
      `{:aiueos/decision :grant ... :aiueos.execute/result <long>
      :aiueos.execute/log [<string>...] :aiueos.execute/topic-bus <bus>}` on a
      completed run, or the same shape with `:aiueos.execute/quota-exceeded
-     {:kind :host-calls|:publishes :limit N :count N}` instead of `:result`
-     when the run aborted mid-execution for exceeding its quota."
+     {:kind :host-calls|:publishes :limit N :count N}` or
+     `:aiueos.execute/fuel-exceeded {:limit N :count N}` instead of `:result`
+     when the run aborted mid-execution."
      [m graph policy wasm-bytes]
      (run-if-granted (broker/verify-one m graph policy) wasm-bytes
-                      (or (:aiueos/quota m) default-quota))))
+                      (or (:aiueos/quota m) default-quota)
+                      (get-in m [:aiueos/limits :fuel] default-fuel))))
 
 #?(:clj
    (defn execute-admission
@@ -271,4 +325,5 @@
      on Chicory exactly like `execute`. Same return shape as `execute`."
      [m graph policy wasm-bytes]
      (run-if-granted (broker/verify-admission m graph policy) wasm-bytes
-                      (or (:aiueos/quota m) default-quota))))
+                      (or (:aiueos/quota m) default-quota)
+                      (get-in m [:aiueos/limits :fuel] default-fuel))))

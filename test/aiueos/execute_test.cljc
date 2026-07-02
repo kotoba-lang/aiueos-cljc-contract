@@ -169,3 +169,53 @@
            result (execute/execute-admission m empty-graph policy* topic-publish-wasm)]
        (is (= :grant (:aiueos/decision result)))
        (is (= :publishes (:kind (:aiueos.execute/quota-exceeded result)))))))
+
+;; ───────── ADR-0001 fuel enforcement (prototype, ADR-2607022900
+;; follow-up 2): real instruction-level metering via Chicory's
+;; withUnsafeExecutionListener, not just a call-count proxy ─────────
+
+#?(:clj
+   (deftest execute-with-generous-default-fuel-runs-normally
+     (testing "an unnormalized manifest (no :aiueos/limits key) falls back
+     to execute/default-fuel (10M) and behaves exactly like before fuel
+     enforcement existed"
+       (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+             m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{:topic/publish}}
+             result (execute/execute m empty-graph policy* topic-publish-wasm)]
+         (is (= :grant (:aiueos/decision result)))
+         (is (not (contains? result :aiueos.execute/fuel-exceeded)))))))
+
+#?(:clj
+   (deftest execute-aborts-when-fuel-is-exhausted
+     (testing "fuel limit 1 -- the component's `main` executes more than
+     one Wasm instruction (a constant load + a call, at minimum), so the
+     run aborts on real per-instruction metering via Chicory's
+     ExecutionListener, not a static analysis"
+       (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+             m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{:topic/publish}
+                :aiueos/limits {:memory-pages 16 :fuel 1}}
+             result (execute/execute m empty-graph policy* topic-publish-wasm)]
+         (is (= :grant (:aiueos/decision result))
+             "the CAPABILITY decision is still :grant -- fuel is a separate, run-time-only limit")
+         (is (not (contains? result :aiueos.execute/result))
+             "no :result -- the run aborted before main returned normally")
+         (is (contains? result :aiueos.execute/fuel-exceeded))
+         (is (= 1 (:limit (:aiueos.execute/fuel-exceeded result))))
+         (is (pos? (:count (:aiueos.execute/fuel-exceeded result)))
+             "the count is whatever the real instruction stream reached before the abort")))))
+
+#?(:clj
+   (deftest execute-fuel-and-quota-are-independent-limits
+     (testing "a generous fuel limit alongside an exhausted quota still
+     reports quota-exceeded, not fuel-exceeded -- confirms the two
+     mechanisms don't interfere with each other"
+       (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+             m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{:topic/publish}
+                :aiueos/quota {:host-calls 1024 :publishes 0}
+                :aiueos/limits {:memory-pages 16 :fuel 10000000}}
+             result (execute/execute m empty-graph policy* topic-publish-wasm)]
+         (is (contains? result :aiueos.execute/quota-exceeded))
+         (is (not (contains? result :aiueos.execute/fuel-exceeded)))))))
