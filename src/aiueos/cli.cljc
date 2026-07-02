@@ -133,6 +133,18 @@
     {:aiueos/surface-id surface-id :aiueos/offered (surface/offered s)}
     (failure :surface/unknown "unknown surface id" {:id surface-id})))
 
+(defn- audit-request
+  "Query/filter an already-loaded audit log. `:aiueos/audit-events` is the
+  host adapter's already-read log (e.g. via `aiueos.audit/read-log`) --
+  this namespace stays host-neutral and never reads the log file itself.
+  Optional `:aiueos/event`/`:aiueos/component` narrow the result, matching
+  the retired Rust `aiueos audit --event/--component` flags."
+  [{:keys [aiueos/audit-events aiueos/event aiueos/component]}]
+  {:aiueos/audit-events
+   (cond->> (or audit-events [])
+     event (filterv #(= event (:aiueos/event %)))
+     component (filterv #(= component (:aiueos/component %))))})
+
 (defn- decision-request
   "Shared shape for `admit`/`run`/`up`: compute the grant/deny decision and
   flag that executing a `:grant` still needs a host adapter."
@@ -160,6 +172,7 @@
       (= command-id :verify) (assoc (verify-request request) :aiueos.cli/command command-id)
       (= command-id :inspect) (assoc (inspect-request request) :aiueos.cli/command command-id)
       (= command-id :surface) (assoc (surface-request request) :aiueos.cli/command command-id)
+      (= command-id :audit) (assoc (audit-request request) :aiueos.cli/command command-id)
       (= command-id :admit) (assoc (decision-request request broker/floor-trust-for-admission)
                                     :aiueos.cli/command command-id)
       (contains? #{:run :up} command-id)

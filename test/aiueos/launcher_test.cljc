@@ -4,7 +4,8 @@
   through `aiueos.launcher/verify-command`/`run-command`/`dispatch` exactly
   as a shell invocation of the CLI would -- genuine file I/O, not
   in-memory-only shortcuts."
-  (:require [aiueos.launcher :as launcher]
+  (:require [aiueos.audit :as audit]
+            [aiueos.launcher :as launcher]
             [aiueos.topic :as topic]
             [clojure.test :refer [deftest is testing]]
             #?(:clj [clojure.java.io :as io])
@@ -100,3 +101,56 @@
          (launcher/dispatch ["verify" manifest-path "--edn"]))
        (let [printed (read-string (str/trim (str out)))]
          (is (= :grant (:aiueos/decision printed)))))))
+
+#?(:clj
+   (deftest inspect-command-reads-a-system-file-and-its-components
+     (let [dir (temp-dir)
+           fs-manifest (io/file dir "fs.edn")
+           app-manifest (io/file dir "app.edn")
+           system-file (io/file dir "system.edn")]
+       (spit fs-manifest (pr-str {:aiueos/component :service/fs :aiueos/kind :service
+                                   :aiueos/exports #{:fs/read} :aiueos/imports #{}}))
+       (spit app-manifest (pr-str {:aiueos/component :app/notes :aiueos/kind :app
+                                    :aiueos/imports #{:fs/read} :aiueos/exports #{}}))
+       (spit system-file (pr-str {:aiueos/system :demo :aiueos/components ["fs.edn" "app.edn"]}))
+       (let [result (launcher/inspect-command (.getPath system-file))]
+         (is (= :inspect (:aiueos.cli/command result)))
+         (is (= [:service/fs] (get-in result [:aiueos/providers :fs/read])))
+         (is (= 2 (count (:aiueos/depths result))))))))
+
+#?(:clj
+   (deftest surface-command-returns-the-offered-set-for-a-known-id
+     (let [result (launcher/surface-command "robot")]
+       (is (= :surface (:aiueos.cli/command result)))
+       (is (contains? (:aiueos/offered result) :topic/publish)))))
+
+#?(:clj
+   (deftest surface-command-denies-an-unknown-id
+     (let [result (launcher/surface-command "teapot")]
+       (is (false? (:aiueos.cli/ok? result))))))
+
+#?(:clj
+   (deftest audit-command-reads-a-real-log-file-and-filters
+     (let [dir (temp-dir)
+           log-file (io/file dir "audit.edn")]
+       (audit/append! log-file (audit/audit-entry :app/a :grant "caps: log/write" 1))
+       (audit/append! log-file (audit/audit-entry :app/b :deny "unresolved" 2))
+       (let [all (launcher/audit-command (.getPath log-file) nil nil)
+             grants-only (launcher/audit-command (.getPath log-file) "grant" nil)]
+         (is (= 2 (count (:aiueos/audit-events all))))
+         (is (= 1 (count (:aiueos/audit-events grants-only))))
+         (is (= :app/a (:aiueos/component (first (:aiueos/audit-events grants-only)))))))))
+
+#?(:clj
+   (deftest audit-command-reads-empty-when-log-file-does-not-exist
+     (let [dir (temp-dir)
+           result (launcher/audit-command (.getPath (io/file dir "no-such-log.edn")) nil nil)]
+       (is (= [] (:aiueos/audit-events result))))))
+
+#?(:clj
+   (deftest dispatch-drives-surface-end-to-end-via-argv
+     (let [out (java.io.StringWriter.)]
+       (binding [*out* out]
+         (launcher/dispatch ["surface" "--id" "robot" "--edn"]))
+       (let [printed (read-string (str/trim (str out)))]
+         (is (contains? (:aiueos/offered printed) :topic/publish))))))

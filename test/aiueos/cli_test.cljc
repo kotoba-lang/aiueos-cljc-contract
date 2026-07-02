@@ -55,6 +55,32 @@
     (is (false? (:aiueos.cli/ok? result)))
     (is (= :surface/unknown (:aiueos.cli/code result)))))
 
+(def sample-audit-events
+  [{:aiueos/ts 1 :aiueos/event :grant :aiueos/component :app/a :aiueos/detail "caps: log/write"}
+   {:aiueos/ts 2 :aiueos/event :deny :aiueos/component :app/b :aiueos/detail "[unresolved-capability] ..."}
+   {:aiueos/ts 3 :aiueos/event :grant :aiueos/component :app/b :aiueos/detail "caps: topic/publish"}])
+
+(deftest audit-returns-all-events-unfiltered
+  (let [result (cli/command-result contract :audit {:aiueos/audit-events sample-audit-events})]
+    (is (= :audit (:aiueos.cli/command result)))
+    (is (= 3 (count (:aiueos/audit-events result))))))
+
+(deftest audit-filters-by-event
+  (let [result (cli/command-result contract :audit
+                                    {:aiueos/audit-events sample-audit-events :aiueos/event :grant})]
+    (is (= 2 (count (:aiueos/audit-events result))))
+    (is (every? #(= :grant (:aiueos/event %)) (:aiueos/audit-events result)))))
+
+(deftest audit-filters-by-component
+  (let [result (cli/command-result contract :audit
+                                    {:aiueos/audit-events sample-audit-events :aiueos/component :app/b})]
+    (is (= 2 (count (:aiueos/audit-events result))))
+    (is (every? #(= :app/b (:aiueos/component %)) (:aiueos/audit-events result)))))
+
+(deftest audit-with-no-events-supplied-returns-empty
+  (let [result (cli/command-result contract :audit {})]
+    (is (= [] (:aiueos/audit-events result)))))
+
 (deftest admit-floors-trust-and-flags-adapter-required-on-grant
   (let [m {:aiueos/component :agent/clean :aiueos/kind :agent :aiueos/trust :trusted
            :aiueos/imports #{:log/write}}

@@ -16,7 +16,8 @@
 
   JVM-only (`#?(:clj ...)` throughout) -- file I/O and `aiueos.execute`'s
   Chicory dependency both require it; not runnable under babashka."
-  (:require [aiueos.broker :as broker]
+  (:require [aiueos.audit :as audit]
+            [aiueos.broker :as broker]
             [aiueos.cli :as cli]
             [aiueos.contract :as contract]
             [aiueos.execute :as execute]
@@ -109,38 +110,119 @@
        (broker/verify-one m g policy*))))
 
 #?(:clj
+   (defn- resolve-system-component-paths
+     "A system.aiueos.edn's `:aiueos/components` is a vector of manifest
+     paths relative to the SYSTEM file itself (matches the retired Rust
+     `System::load` convention -- same base-directory rule
+     `resolve-wasm-path` applies to a single manifest's `:aiueos/wasm`)."
+     [system-path components]
+     (let [base (.getParentFile (io/file system-path))]
+       (mapv #(.getPath (io/file base %)) components))))
+
+#?(:clj
+   (defn load-system
+     "Read SYSTEM-PATH (`{:aiueos/system id :aiueos/components [paths...]}`)
+     and return the vector of normalized component manifests, each loaded
+     via `load-manifest` from a path relative to SYSTEM-PATH."
+     [system-path]
+     (let [raw (read-edn-file system-path)
+           validation (contract/validate-system raw)]
+       (when-not (:valid? validation)
+         (throw (ex-info (str system-path ": invalid system") validation)))
+       (mapv load-manifest
+             (resolve-system-component-paths system-path (:aiueos/components raw))))))
+
+#?(:clj
+   (defn inspect-command
+     "The `inspect` command body: load SYSTEM-PATH's components and return
+     `aiueos.cli`'s `:inspect` result (capability providers, boot order,
+     dependency depths) -- no execution, `:full` coverage."
+     [system-path]
+     (cli/command-result (cli/read-contract) :inspect
+                          {:aiueos/components (load-system system-path)})))
+
+#?(:clj
+   (defn surface-command
+     "The `surface inspect --id <id>` command body: no file I/O needed
+     beyond the contract itself."
+     [surface-id-str]
+     (cli/command-result (cli/read-contract) :surface
+                          {:aiueos/surface-id (keyword surface-id-str)})))
+
+#?(:clj
+   (defn audit-command
+     "The `audit` command body: read the log at LOG-PATH (defaulting to
+     `aiueos.audit/log-path` under the current directory when nil, matching
+     the retired Rust `AuditLog::under` default) via `aiueos.audit/read-log`,
+     then delegate the pure event/component filtering to
+     `aiueos.cli`'s `:audit` handler."
+     [log-path event-str component-str]
+     (let [path (or log-path (.getPath (audit/log-path ".")))
+           events (audit/read-log path)]
+       (cli/command-result (cli/read-contract) :audit
+                            (cond-> {:aiueos/audit-events events}
+                              event-str (assoc :aiueos/event (keyword event-str))
+                              component-str (assoc :aiueos/component (keyword component-str)))))))
+
+#?(:clj
    (defn- print-result [result edn?]
-     (if edn?
-       (println (pr-str result))
+     (cond
+       edn? (println (pr-str result))
+
+       (contains? result :aiueos/decision)
        (do (println (str (name (:aiueos/decision result)) " " (name (:aiueos/component result))))
            (when (:aiueos/violations result)
              (doseq [v (:aiueos/violations result)]
                (println (str "  [" (name (:aiueos/kind v)) "] " (:aiueos/message v)))))
            (when (contains? result :aiueos.execute/result)
-             (println (str "  result: " (:aiueos.execute/result result))))))))
+             (println (str "  result: " (:aiueos.execute/result result)))))
+
+       (contains? result :aiueos/boot-order)
+       (do (println (str "boot order: " (get-in result [:aiueos/boot-order :aiueos.graph/order])))
+           (println (str "depths: " (:aiueos/depths result))))
+
+       (contains? result :aiueos/offered)
+       (println (str (name (:aiueos/surface-id result)) " offers: " (:aiueos/offered result)))
+
+       (contains? result :aiueos/audit-events)
+       (doseq [{:aiueos/keys [ts event component detail]} (:aiueos/audit-events result)]
+         (println (str ts " [" (name event) "] " (name component) " -- " detail)))
+
+       :else (println (pr-str result)))))
 
 #?(:clj
    (defn dispatch
      "Run one aiueos CLI invocation. ARGV[0] is the command name; the rest
-     are positionals/flags, shaped via `aiueos.cli/parse-argv`. Supported
-     today: `verify`/`run`/`admit` (all three: `<manifest-path>
-     [--policy <path>] [--edn]`) -- the commands `aiueos.execute` makes
-     genuinely executable on this JVM launcher. Other `aiueos.cli.edn`
-     commands (`inspect`/`surface`/`audit`/`up`/the adapter-only six)
-     are not wired here yet."
+     are positionals/flags, shaped via `aiueos.cli/parse-argv`.
+
+     `verify`/`run`/`admit <manifest-path> [--policy <path>] [--edn]` --
+     `run`/`admit` actually execute a granted component via `aiueos.execute`.
+     `inspect <system-path> [--edn]` -- capability providers/boot
+     order/depths across a system's components.
+     `surface <surface-id> [--edn]` -- a deployment surface's offered set.
+     `audit [--log <path>] [--event <kw>] [--component <kw>] [--edn]` --
+     query the append-only audit log (defaults to `.aiueos/audit.edn`
+     under the current directory).
+
+     The adapter-only six (`sign`/`check`/`compile`/`hash`/`image`/`vm`)
+     and `up` are not wired here -- `check`/`compile` delegate to
+     kototama/kotoba-clj, `sign` is key-custody tooling, `image`/`vm` are
+     native provisioning (see `aiueos.cli`'s namespace docstring); `up`
+     needs multi-component orchestration this launcher doesn't do yet."
      [argv]
      (let [command (some-> (first argv) keyword)
            {:keys [positionals options]} (cli/parse-argv (rest argv))
-           manifest-path (first positionals)
-           policy-path (:policy options)
            edn? (boolean (:edn options))]
        (case command
-         :verify (print-result (verify-command manifest-path policy-path) edn?)
-         :run (print-result (run-command manifest-path policy-path false) edn?)
-         :admit (print-result (run-command manifest-path policy-path true) edn?)
+         :verify (print-result (verify-command (first positionals) (:policy options)) edn?)
+         :run (print-result (run-command (first positionals) (:policy options) false) edn?)
+         :admit (print-result (run-command (first positionals) (:policy options) true) edn?)
+         :inspect (print-result (inspect-command (first positionals)) edn?)
+         :surface (print-result (surface-command (or (first positionals) (:id options))) edn?)
+         :audit (print-result (audit-command (:log options) (:event options) (:component options)) edn?)
          (do (binding [*out* *err*]
                (println (str "aiueos: unsupported or not-yet-wired command `" (name command) "`"))
-               (println "supported: verify, run, admit"))
+               (println "supported: verify, run, admit, inspect, surface, audit"))
              #?(:clj (System/exit 2)))))))
 
 #?(:clj

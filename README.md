@@ -39,10 +39,12 @@ contracts as adapters/providers elsewhere, but they are not authority here.
 - `src/aiueos/launcher.cljc` is a real, runnable CLI: the retired Rust
   `bin/aiueos.rs`'s argv-parsing/file-I/O role, reimplemented as JVM Clojure.
   Ties `aiueos.cli` + `aiueos.manifest` + `aiueos.policy`/`aiueos.broker` +
-  `aiueos.execute` together. `verify`/`run`/`admit` are wired today (`run`/`admit`
-  actually execute a granted component's declared `:aiueos/wasm`, not just decide).
-  Try it: `clojure -M -m aiueos.launcher run <manifest>.edn --edn`. **JVM-only**,
-  same reason as `aiueos.execute`.
+  `aiueos.execute`/`aiueos.audit` together. `verify`/`run`/`admit`/`inspect`/
+  `surface`/`audit` are wired today (`run`/`admit` actually execute a granted
+  component's declared `:aiueos/wasm`, not just decide). Try it:
+  `clojure -M -m aiueos.launcher run <manifest>.edn --edn`. **JVM-only**, same
+  reason as `aiueos.execute`. Not wired: `up` (multi-component orchestration)
+  and the adapter-only six (`sign`/`check`/`compile`/`hash`/`image`/`vm`).
 - `resources/aiueos/component_boundary.edn` owns the component imports/exports.
 - `resources/aiueos/policy_contract.edn` / `broker_contract.edn` own the policy/broker decision tables.
 - `resources/aiueos/cli.edn` owns the CLI command/option contract.
