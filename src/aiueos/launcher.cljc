@@ -120,17 +120,30 @@
        (mapv #(.getPath (io/file base %)) components))))
 
 #?(:clj
-   (defn load-system
+   (defn load-system-entries
      "Read SYSTEM-PATH (`{:aiueos/system id :aiueos/components [paths...]}`)
-     and return the vector of normalized component manifests, each loaded
-     via `load-manifest` from a path relative to SYSTEM-PATH."
+     and return `[{:aiueos.launcher/path <manifest-path> :aiueos/manifest
+     <normalized-manifest>} ...]`, one per component, in
+     `:aiueos/components` declaration order (NOT boot order -- see
+     `up-command` for that). Keeping each manifest's own file path
+     alongside it (rather than just the normalized manifest, as
+     `load-system` returns) is what lets `up-command` resolve each
+     component's OWN `:aiueos/wasm` relative to ITS OWN manifest file,
+     exactly like `run-command` does for a single manifest."
      [system-path]
      (let [raw (read-edn-file system-path)
            validation (contract/validate-system raw)]
        (when-not (:valid? validation)
          (throw (ex-info (str system-path ": invalid system") validation)))
-       (mapv load-manifest
+       (mapv (fn [path] {:aiueos.launcher/path path :aiueos/manifest (load-manifest path)})
              (resolve-system-component-paths system-path (:aiueos/components raw))))))
+
+#?(:clj
+   (defn load-system
+     "Read SYSTEM-PATH and return just the vector of normalized component
+     manifests (see `load-system-entries` for the path-carrying variant)."
+     [system-path]
+     (mapv :aiueos/manifest (load-system-entries system-path))))
 
 #?(:clj
    (defn inspect-command
@@ -140,6 +153,53 @@
      [system-path]
      (cli/command-result (cli/read-contract) :inspect
                           {:aiueos/components (load-system system-path)})))
+
+#?(:clj
+   (defn up-command
+     "The `up` command body: boot every component of SYSTEM-PATH in
+     dependency order (`aiueos.graph/boot-order`) -- providers before
+     consumers. Each component is verified + (if granted and it declares
+     `:aiueos/wasm`) actually executed via `aiueos.execute/execute`,
+     exactly like `run-command` does for a single manifest; a component
+     with no `:aiueos/wasm` (a pure capability provider with nothing to
+     run) only gets a decision, matching `verify-command`.
+
+     Stops at the FIRST denied/quota-or-fuel-exceeded component -- a
+     system doesn't boot past a component that can't run, since later
+     components may depend on it. Returns `{:aiueos.cli/ok? true
+     :aiueos/boot-results [...]}` on a clean boot (every component
+     reached, in boot order) or `{:aiueos.cli/ok? false
+     :aiueos/boot-results [...] :aiueos/stopped-at <component-id>}` when
+     boot halted early. A dependency CYCLE (no valid boot order exists)
+     is reported as `{:aiueos.cli/ok? false :aiueos.cli/code
+     :graph/cycle :aiueos/cycle [component-ids...]}` before anything
+     executes."
+     [system-path policy-path]
+     (let [entries (load-system-entries system-path)
+           manifests (mapv :aiueos/manifest entries)
+           policy* (load-policy policy-path)
+           g (graph/build manifests)
+           order-result (graph/boot-order manifests)]
+       (if-let [cycle (:aiueos.graph/cycle order-result)]
+         {:aiueos.cli/command :up :aiueos.cli/ok? false :aiueos.cli/code :graph/cycle
+          :aiueos/cycle cycle}
+         (loop [indices (get-in order-result [:aiueos.graph/order]) results []]
+           (if (empty? indices)
+             {:aiueos.cli/command :up :aiueos.cli/ok? true :aiueos/boot-results results}
+             (let [i (first indices)
+                   {:aiueos.launcher/keys [path] :aiueos/keys [manifest]} (nth entries i)
+                   wasm-path (resolve-wasm-path path manifest)
+                   result (if wasm-path
+                            (execute/execute manifest g policy* (read-wasm-bytes wasm-path))
+                            (broker/verify-one manifest g policy*))
+                   results' (conj results result)
+                   booted? (and (= :grant (:aiueos/decision result))
+                                (not (contains? result :aiueos.execute/quota-exceeded))
+                                (not (contains? result :aiueos.execute/fuel-exceeded)))]
+               (if booted?
+                 (recur (rest indices) results')
+                 {:aiueos.cli/command :up :aiueos.cli/ok? false :aiueos/boot-results results'
+                  :aiueos/stopped-at (:aiueos/component manifest)}))))))))
 
 #?(:clj
    (defn surface-command
@@ -188,6 +248,17 @@
        (doseq [{:aiueos/keys [ts event component detail]} (:aiueos/audit-events result)]
          (println (str ts " [" (name event) "] " (name component) " -- " detail)))
 
+       (contains? result :aiueos/boot-results)
+       (do (doseq [r (:aiueos/boot-results result)]
+             (println (str (name (:aiueos/decision r)) " " (name (:aiueos/component r))
+                            (when (contains? r :aiueos.execute/quota-exceeded) " (quota exceeded)")
+                            (when (contains? r :aiueos.execute/fuel-exceeded) " (fuel exceeded)"))))
+           (when (:aiueos/stopped-at result)
+             (println (str "boot stopped at " (name (:aiueos/stopped-at result))))))
+
+       (contains? result :aiueos/cycle)
+       (println (str "boot order impossible -- dependency cycle: " (:aiueos/cycle result)))
+
        :else (println (pr-str result)))))
 
 #?(:clj
@@ -203,12 +274,15 @@
      `audit [--log <path>] [--event <kw>] [--component <kw>] [--edn]` --
      query the append-only audit log (defaults to `.aiueos/audit.edn`
      under the current directory).
+     `up <system-path> [--policy <path>] [--edn]` -- boot every component
+     of a system in dependency order, executing each as it's reached
+     (`up-command`); stops at the first denied/quota-or-fuel-exceeded
+     component.
 
      The adapter-only six (`sign`/`check`/`compile`/`hash`/`image`/`vm`)
-     and `up` are not wired here -- `check`/`compile` delegate to
+     are not wired here -- `check`/`compile` delegate to
      kototama/kotoba-clj, `sign` is key-custody tooling, `image`/`vm` are
-     native provisioning (see `aiueos.cli`'s namespace docstring); `up`
-     needs multi-component orchestration this launcher doesn't do yet."
+     native provisioning (see `aiueos.cli`'s namespace docstring)."
      [argv]
      (let [command (some-> (first argv) keyword)
            {:keys [positionals options]} (cli/parse-argv (rest argv))
@@ -220,9 +294,10 @@
          :inspect (print-result (inspect-command (first positionals)) edn?)
          :surface (print-result (surface-command (or (first positionals) (:id options))) edn?)
          :audit (print-result (audit-command (:log options) (:event options) (:component options)) edn?)
+         :up (print-result (up-command (first positionals) (:policy options)) edn?)
          (do (binding [*out* *err*]
                (println (str "aiueos: unsupported or not-yet-wired command `" (name command) "`"))
-               (println "supported: verify, run, admit, inspect, surface, audit"))
+               (println "supported: verify, run, admit, inspect, surface, audit, up"))
              #?(:clj (System/exit 2)))))))
 
 #?(:clj
