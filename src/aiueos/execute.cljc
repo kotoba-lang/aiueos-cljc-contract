@@ -28,7 +28,18 @@
   interpreter path -- Chicory's separate AOT compiler bypasses it
   entirely. Treat fuel enforcement here as a working prototype on an
   unofficial API, not a permanent guarantee (ADR-2607022900 follow-up
-  2, 2026-07-02)."
+  2, 2026-07-02).
+
+  `:aiueos/limits :memory-pages` (ADR-0001) IS enforced, and via a
+  STABLE Chicory API (`Instance.Builder/withMemoryLimits`, not marked
+  unsafe/experimental like the fuel listener) -- `memory-pages-limits`
+  reads the module's own declared initial page count (never overridden;
+  a module that needs N pages to even start must still get them) and
+  caps only the MAXIMUM a `memory.grow` call can reach to
+  `min(manifest-limit, module's-own-declared-max)`. Verified empirically
+  (not just per Chicory's docs) that this genuinely blocks growth: a
+  module instantiated with a capped `MemoryLimits` sees `Memory/grow`
+  return -1 past the cap, its page count unchanged."
   (:require [aiueos.broker :as broker]
             [aiueos.manifest :as manifest]
             [aiueos.topic :as topic]
@@ -37,7 +48,7 @@
      (:import (com.dylibso.chicory.runtime ExecutionListener HostFunction ImportFunction
                                            ImportValues Instance WasmFunctionHandle)
               (com.dylibso.chicory.wasm Parser)
-              (com.dylibso.chicory.wasm.types FunctionType ValType))))
+              (com.dylibso.chicory.wasm.types FunctionType MemoryLimits ValType))))
 
 #?(:clj
    (defn- read-str
@@ -118,6 +129,24 @@
            (when (> n limit)
              (throw (ex-info "aiueos fuel exceeded"
                               {:aiueos.execute/fuel-exceeded {:limit limit :count n}}))))))))
+
+#?(:clj
+   (defn- memory-limits-for
+     "`:aiueos/limits :memory-pages` (ADR-0001) enforcement, as a Chicory
+     `MemoryLimits` for `instantiate` to pass to `withMemoryLimits`. MODULE
+     is the already-`Parser/parse`d WasmModule -- every `.kotoba`-compiled
+     module declares its own memory section (`kotoba-clj` always emits
+     `:kotoba.wasm/memory? true`), so this reads that section's OWN
+     `initialPages` and NEVER overrides it (a module that needs N pages to
+     even start must still get them -- overriding initial to less than
+     what the module declares silently starts it under-provisioned, which
+     empirically causes `Instance/builder` to still \"succeed\" but hands
+     the guest less memory than it assumes it has). Only the MAXIMUM a
+     `memory.grow` call can reach is capped, to
+     `min(manifest-limit, module's-own-declared-max)`."
+     [module manifest-limit]
+     (let [own-limits (.limits (.getMemory (.get (.memorySection module)) 0))]
+       (MemoryLimits. (.initialPages own-limits) (min manifest-limit (.maximumPages own-limits))))))
 
 #?(:clj
    (defn- device-access-stub
@@ -248,11 +277,14 @@
      (`{:host-calls N :publishes N}`, ADR-0006) -- `has_capability` itself
      is NOT quota-counted (a link-time permission check, not a resource-
      consuming action). FUEL-LIMIT (`:aiueos/limits :fuel`, ADR-0001) is
-     wired via `fuel-listener` (see namespace docstring). TOPIC-ALLOWED is
-     `{:publishes <set-or-nil> :subscribes <set-or-nil>}` -- the manifest's
-     `:aiueos/publishes`/`:aiueos/subscribes` topic-id allow-sets (`nil` =
-     unrestricted), enforced via `assert-topic-allowed!`."
-     [wasm-bytes log-atom topic-bus-atom quota fuel-limit topic-allowed]
+     wired via `fuel-listener` (see namespace docstring). MEMORY-PAGES-LIMIT
+     (`:aiueos/limits :memory-pages`, ADR-0001) is wired via
+     `memory-limits-for`/`withMemoryLimits` (see namespace docstring).
+     TOPIC-ALLOWED is `{:publishes <set-or-nil> :subscribes <set-or-nil>}`
+     -- the manifest's `:aiueos/publishes`/`:aiueos/subscribes` topic-id
+     allow-sets (`nil` = unrestricted), enforced via
+     `assert-topic-allowed!`."
+     [wasm-bytes log-atom topic-bus-atom quota fuel-limit memory-pages-limit topic-allowed]
      (let [host-calls-atom (atom 0)
            publishes-atom (atom 0)
            fuel-atom (atom 0)
@@ -270,6 +302,7 @@
        (-> (Instance/builder module)
            (.withImportValues imports)
            (.withUnsafeExecutionListener (fuel-listener fuel-atom fuel-limit))
+           (.withMemoryLimits (memory-limits-for module memory-pages-limit))
            .build))))
 
 #?(:clj
@@ -292,6 +325,12 @@
      "Used when `m` has no `:aiueos/limits :fuel` -- same generous default
      `normalize-limits` applies (10,000,000 Wasm instructions per run)."
      manifest/default-fuel))
+
+#?(:clj
+   (def default-memory-pages
+     "Used when `m` has no `:aiueos/limits :memory-pages` -- same generous
+     default `normalize-limits` applies (16 pages = 1 MiB)."
+     manifest/default-memory-pages))
 
 #?(:clj
    (defn- exceeded-key [e]
@@ -321,20 +360,33 @@
      `default-quota`) caps host-call/publish counts (ADR-0006); FUEL-LIMIT
      (`:aiueos/limits :fuel`, defaults to `default-fuel`) caps Wasm
      instructions executed (ADR-0001, prototype -- see namespace
-     docstring); TOPIC-ALLOWED (`topic-allowed-for`) restricts topic-*
-     calls to the manifest's declared topic ids. Exceeding/violating any
-     of these aborts the run; the result carries
+     docstring); MEMORY-PAGES-LIMIT (`:aiueos/limits :memory-pages`,
+     defaults to `default-memory-pages`) caps how far the component's own
+     `memory.grow` can reach (a stable Chicory API, unlike fuel -- see
+     namespace docstring); TOPIC-ALLOWED (`topic-allowed-for`) restricts
+     topic-* calls to the manifest's declared topic ids. Exceeding/
+     violating quota/fuel/topic-allowed aborts the run; the result carries
      `:aiueos.execute/quota-exceeded`, `:aiueos.execute/fuel-exceeded`, or
      `:aiueos.execute/topic-forbidden` instead of `:aiueos.execute/result`,
      with whatever log/topic-bus state accumulated before the abort still
-     attached. An unrelated exception still propagates uncaught."
+     attached. An unrelated exception still propagates uncaught.
+
+     MEMORY-PAGES-LIMIT does NOT abort the run this way -- unlike
+     quota/fuel/topic-allowed (host-side policy checks), a `memory.grow`
+     beyond the cap is real WebAssembly semantics: Chicory's `Memory/grow`
+     returns -1 (the standard \"grow failed\" sentinel) to the GUEST's own
+     code, which keeps running and decides what to do with that -1 itself
+     -- same as any other Wasm runtime's memory limit, not an aiueos-
+     specific abort."
      ([decision wasm-bytes]
-      (run-if-granted decision wasm-bytes default-quota default-fuel {:publishes nil :subscribes nil}))
-     ([decision wasm-bytes quota fuel-limit topic-allowed]
+      (run-if-granted decision wasm-bytes default-quota default-fuel default-memory-pages
+                       {:publishes nil :subscribes nil}))
+     ([decision wasm-bytes quota fuel-limit memory-pages-limit topic-allowed]
       (if (= :grant (:aiueos/decision decision))
         (let [log-atom (atom [])
               topic-bus-atom (atom topic/empty-bus)
-              instance (instantiate wasm-bytes log-atom topic-bus-atom quota fuel-limit topic-allowed)]
+              instance (instantiate wasm-bytes log-atom topic-bus-atom quota fuel-limit
+                                     memory-pages-limit topic-allowed)]
           (try
             (let [result (call-main instance)]
               (assoc decision
@@ -356,7 +408,8 @@
      `graph`/`policy` via `aiueos.broker/verify-one`; only if granted,
      instantiate WASM-BYTES on Chicory and call its exported `main`, capped
      by `m`'s `:aiueos/quota` (`default-quota` if unnormalized),
-     `:aiueos/limits :fuel` (`default-fuel` if unnormalized), and
+     `:aiueos/limits :fuel`/`:memory-pages` (`default-fuel`/
+     `default-memory-pages` if unnormalized), and
      `:aiueos/publishes`/`:aiueos/subscribes` (unrestricted if unnormalized).
 
      Returns `{:aiueos/decision :deny ...}` (the broker's denial, unexecuted),
@@ -366,11 +419,13 @@
      {:kind :host-calls|:publishes :limit N :count N}`,
      `:aiueos.execute/fuel-exceeded {:limit N :count N}`, or
      `:aiueos.execute/topic-forbidden {:op :publish|:subscribe :topic-id N}`
-     instead of `:result` when the run aborted mid-execution."
+     instead of `:result` when the run aborted mid-execution
+     (`:memory-pages` never aborts -- see `run-if-granted`'s docstring)."
      [m graph policy wasm-bytes]
      (run-if-granted (broker/verify-one m graph policy) wasm-bytes
                       (or (:aiueos/quota m) default-quota)
                       (get-in m [:aiueos/limits :fuel] default-fuel)
+                      (get-in m [:aiueos/limits :memory-pages] default-memory-pages)
                       (topic-allowed-for m))))
 
 #?(:clj
@@ -385,4 +440,5 @@
      (run-if-granted (broker/verify-admission m graph policy) wasm-bytes
                       (or (:aiueos/quota m) default-quota)
                       (get-in m [:aiueos/limits :fuel] default-fuel)
+                      (get-in m [:aiueos/limits :memory-pages] default-memory-pages)
                       (topic-allowed-for m))))

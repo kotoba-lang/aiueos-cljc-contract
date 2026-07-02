@@ -47,8 +47,26 @@
 (def ^:private pci-config-wasm-b64
   "AGFzbQEAAAABCwJgAn9/AX9gAAF/AhUBBmtvdG9iYQpwY2lfY29uZmlnAAADAgEBBQMBAAEGBwF/\nAUGAEAsHEQIEbWFpbgABBm1lbW9yeQIACgoBCABBAEEQEAAL")
 
+;; No aiueos host imports at all -- built directly from WAT via wasm-tools,
+;; not kotoba-clj (kotoba-clj's `memory-grow` primitive exists but this
+;; module doesn't need any kotoba:* import surface, just raw Wasm
+;; memory.grow, so hand-authored WAT is the more direct proof source here):
+;;   (module
+;;     (memory (export "memory") 1)
+;;     (func (export "main") (result i32)
+;;       i32.const 10
+;;       memory.grow))
+;; main() returns memory.grow's own result: the previous page count (1) on
+;; success, or -1 on failure -- the real WebAssembly "grow failed" sentinel,
+;; observable directly in :aiueos.execute/result.
+(def ^:private memory-grow-wasm-b64
+  "AGFzbQEAAAABBQFgAAF/AwIBAAUDAQABBxECBm1lbW9yeQIABG1haW4AAAoIAQYAQQpAAAs=")
+
 #?(:clj
    (def topic-publish-wasm (b64->bytes topic-publish-wasm-b64)))
+
+#?(:clj
+   (def memory-grow-wasm (b64->bytes memory-grow-wasm-b64)))
 
 (def empty-graph (graph/build []))
 
@@ -265,3 +283,46 @@
              result (execute/execute m empty-graph policy* topic-publish-wasm)]
          (is (not (contains? result :aiueos.execute/topic-forbidden)))
          (is (= 42 (topic/latest (:aiueos.execute/topic-bus result) 1)))))))
+
+;; ───────── :aiueos/limits :memory-pages (ADR-0001): a stable Chicory API
+;; (withMemoryLimits), unlike fuel -- and unlike quota/fuel/topic-allowed,
+;; it does NOT abort the run: memory.grow beyond the cap returns -1 to the
+;; GUEST's own code (real WebAssembly semantics), observable directly in
+;; :aiueos.execute/result rather than a *-exceeded/-forbidden key ─────────
+
+#?(:clj
+   (deftest execute-with-generous-default-memory-pages-lets-memory-grow-succeed
+     (testing "an unnormalized manifest (no :aiueos/limits key) falls back
+     to execute/default-memory-pages (16 pages); growing by 10 stays well
+     within that, so memory.grow succeeds and returns the previous page
+     count (1)"
+       (let [m {:aiueos/component :app/memory-grow :aiueos/kind :app :aiueos/trust :verified}
+             result (execute/execute m empty-graph policy/default-policy memory-grow-wasm)]
+         (is (= :grant (:aiueos/decision result)))
+         (is (= 1 (:aiueos.execute/result result))
+             "memory.grow(10) succeeded -- returns the PREVIOUS page count, not the new one")))))
+
+#?(:clj
+   (deftest execute-caps-memory-growth-and-the-guest-observes-the-failure
+     (testing ":memory-pages 1 -- the module's own declared initial (1
+     page) is honored (instantiation succeeds, unlike setting initial
+     itself too low), but growing by 10 pages exceeds the cap; the guest's
+     own memory.grow call gets Wasm's real -1 failure sentinel -- this is
+     NOT an aiueos abort, :aiueos.execute/result is still populated
+     normally, just holding the guest's own -1"
+       (let [m {:aiueos/component :app/memory-grow :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/limits {:memory-pages 1 :fuel 10000000}}
+             result (execute/execute m empty-graph policy/default-policy memory-grow-wasm)]
+         (is (= :grant (:aiueos/decision result)))
+         (is (= -1 (:aiueos.execute/result result))
+             "memory.grow(10) FAILED under the cap -- Wasm's own -1 sentinel, not an aiueos exception")
+         (is (not (contains? result :aiueos.execute/fuel-exceeded))
+             "the memory cap is independent of fuel -- a generous fuel limit alongside it doesn't abort anything")))))
+
+#?(:clj
+   (deftest execute-admission-also-caps-memory-growth
+     (let [m {:aiueos/component :app/memory-grow :aiueos/kind :app :aiueos/trust :ai-generated
+              :aiueos/limits {:memory-pages 1 :fuel 10000000}}
+           result (execute/execute-admission m empty-graph policy/default-policy memory-grow-wasm)]
+       (is (= :grant (:aiueos/decision result)))
+       (is (= -1 (:aiueos.execute/result result))))))

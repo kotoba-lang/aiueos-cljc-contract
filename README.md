@@ -47,7 +47,15 @@ contracts as adapters/providers elsewhere, but they are not authority here.
   thread-interrupt timeout, not this) — treat fuel enforcement as a working
   prototype on an unofficial API, not a permanent guarantee. It also only fires
   in Chicory's interpreter path; a future switch to Chicory's AOT compiler would
-  bypass it entirely. Also enforces `:aiueos/publishes`/`:aiueos/subscribes`
+  bypass it entirely. Also enforces `:aiueos/limits :memory-pages` (ADR-0001) —
+  via a **stable** Chicory API (`Instance.Builder/withMemoryLimits`, not marked
+  unsafe/experimental like the fuel listener). Reads the module's own declared
+  initial page count (never overridden — a module that needs N pages to start
+  still gets them) and caps only the maximum `memory.grow` can reach. Unlike
+  quota/fuel/topic-forbidden, this does NOT abort the run — `memory.grow` past
+  the cap returns Wasm's own `-1` failure sentinel to the guest, observable
+  directly in `:aiueos.execute/result`, same as any other Wasm runtime's memory
+  limit. Also enforces `:aiueos/publishes`/`:aiueos/subscribes`
   (the topic-id allow-set `aiueos.manifest/normalize` derives) — a granted
   component's `topic_publish`/`topic_poll`/`topic_take`/`topic_count` calls are
   restricted to its declared topic ids (`nil` = unrestricted); this was
