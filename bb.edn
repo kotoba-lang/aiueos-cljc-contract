@@ -6,13 +6,17 @@
            (require 'aiueos.audit-test
                     'aiueos.contract-test
                     'aiueos.graph-test
+                    'aiueos.manifest-test
                     'aiueos.policy-test
+                    'aiueos.signing-test
                     'aiueos.surface-test
                     'aiueos.topic-test)
            (clojure.test/run-tests 'aiueos.audit-test
                                    'aiueos.contract-test
                                    'aiueos.graph-test
+                                   'aiueos.manifest-test
                                    'aiueos.policy-test
+                                   'aiueos.signing-test
                                    'aiueos.surface-test
                                    'aiueos.topic-test))}
 
@@ -22,12 +26,16 @@
            (require 'aiueos.audit-test
                     'aiueos.contract-test
                     'aiueos.graph-test
+                    'aiueos.manifest-test
                     'aiueos.policy-test
+                    'aiueos.signing-test
                     'aiueos.surface-test
                     'aiueos.topic-test)
            (clojure.test/run-tests 'aiueos.audit-test
                                    'aiueos.contract-test
                                    'aiueos.graph-test
+                                   'aiueos.manifest-test
                                    'aiueos.policy-test
+                                   'aiueos.signing-test
                                    'aiueos.surface-test
                                    'aiueos.topic-test))}}}
