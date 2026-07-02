@@ -1,6 +1,6 @@
 #:aiueos.broker{:id :aiueos/capability-broker,
                 :authority [:kotoba-clj :edn],
-                :source-files [],
+                :source-files ["src/aiueos/broker.cljc"],
                 :policy :aiueos/default-policy,
                 :component-boundary :aiueos/component,
                 :flows
