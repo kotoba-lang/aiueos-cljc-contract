@@ -154,3 +154,91 @@
          (launcher/dispatch ["surface" "--id" "robot" "--edn"]))
        (let [printed (read-string (str/trim (str out)))]
          (is (contains? (:aiueos/offered printed) :topic/publish))))))
+
+;; ───────── up: multi-component boot orchestration ─────────
+
+#?(:clj
+   (defn- write-two-component-system!
+     "A real 2-component system on disk: fs.edn (a pure capability
+     provider, no :aiueos/wasm -- decision-only, matching verify-command's
+     shape) and app.edn (imports :fs/read from fs AND declares
+     :aiueos/wasm topic_publish.wasm -- ACTUALLY executes via
+     aiueos.execute when up-command reaches it, exactly like
+     run-command-reads-the-declared-wasm-path-and-really-executes above).
+     Returns the system.edn path."
+     [dir]
+     (let [wasm-bytes (.decode (java.util.Base64/getDecoder)
+                                (str/replace topic-publish-wasm-b64 "\n" ""))
+           fs-manifest (io/file dir "fs.edn")
+           app-manifest (io/file dir "app.edn")
+           app-wasm (io/file dir "topic_publish.wasm")
+           system-file (io/file dir "system.edn")]
+       (spit fs-manifest (pr-str {:aiueos/component :service/fs :aiueos/kind :service
+                                   :aiueos/exports #{:fs/read} :aiueos/imports #{}}))
+       (io/copy wasm-bytes app-wasm)
+       (spit app-manifest (pr-str {:aiueos/component :app/topic-publish :aiueos/kind :app
+                                    :aiueos/trust :verified :aiueos/wasm "topic_publish.wasm"
+                                    :aiueos/imports #{:fs/read :topic/publish} :aiueos/exports #{}}))
+       (spit system-file (pr-str {:aiueos/system :demo :aiueos/components ["fs.edn" "app.edn"]}))
+       (.getPath system-file))))
+
+#?(:clj
+   (deftest up-command-boots-a-provider-then-a-consumer-and-actually-executes-it
+     (let [dir (temp-dir)
+           system-path (write-two-component-system! dir)
+           result (launcher/up-command system-path nil)]
+       (is (true? (:aiueos.cli/ok? result)))
+       (is (= 2 (count (:aiueos/boot-results result))))
+       (is (= :service/fs (:aiueos/component (first (:aiueos/boot-results result))))
+           "fs (the provider) boots before app (the consumer) -- boot-order, not declaration order, though here they're the same")
+       (is (not (contains? (first (:aiueos/boot-results result)) :aiueos.execute/result))
+           "fs has no :aiueos/wasm -- decision-only, like verify-command")
+       (let [app-result (second (:aiueos/boot-results result))]
+         (is (= :app/topic-publish (:aiueos/component app-result)))
+         (is (= 42 (topic/latest (:aiueos.execute/topic-bus app-result) 1))
+             "app DOES have :aiueos/wasm -- up-command actually executed it via Chicory")))))
+
+#?(:clj
+   (deftest up-command-stops-at-the-first-denied-component
+     (let [dir (temp-dir)
+           fs-manifest (io/file dir "fs.edn")
+           app-manifest (io/file dir "app.edn")
+           system-file (io/file dir "system.edn")]
+       (spit fs-manifest (pr-str {:aiueos/component :service/fs :aiueos/kind :service
+                                   :aiueos/exports #{:fs/read}
+                                   :aiueos/imports #{:custom/nobody-provides-this}}))
+       (spit app-manifest (pr-str {:aiueos/component :app/notes :aiueos/kind :app
+                                    :aiueos/imports #{:fs/read} :aiueos/exports #{}}))
+       (spit system-file (pr-str {:aiueos/system :demo :aiueos/components ["fs.edn" "app.edn"]}))
+       (let [result (launcher/up-command (.getPath system-file) nil)]
+         (is (false? (:aiueos.cli/ok? result)))
+         (is (= :service/fs (:aiueos/stopped-at result)))
+         (is (= 1 (count (:aiueos/boot-results result)))
+             "app never even gets a boot attempt -- fs (its dependency) never came up")))))
+
+#?(:clj
+   (deftest up-command-reports-a-dependency-cycle-before-executing-anything
+     (let [dir (temp-dir)
+           a-manifest (io/file dir "a.edn")
+           b-manifest (io/file dir "b.edn")
+           system-file (io/file dir "system.edn")]
+       (spit a-manifest (pr-str {:aiueos/component :app/a :aiueos/kind :app
+                                  :aiueos/imports #{:b/thing} :aiueos/exports #{:a/thing}}))
+       (spit b-manifest (pr-str {:aiueos/component :app/b :aiueos/kind :app
+                                  :aiueos/imports #{:a/thing} :aiueos/exports #{:b/thing}}))
+       (spit system-file (pr-str {:aiueos/system :demo :aiueos/components ["a.edn" "b.edn"]}))
+       (let [result (launcher/up-command (.getPath system-file) nil)]
+         (is (false? (:aiueos.cli/ok? result)))
+         (is (= :graph/cycle (:aiueos.cli/code result)))
+         (is (not (contains? result :aiueos/boot-results)))))))
+
+#?(:clj
+   (deftest dispatch-drives-up-end-to-end-via-argv
+     (let [dir (temp-dir)
+           system-path (write-two-component-system! dir)
+           out (java.io.StringWriter.)]
+       (binding [*out* out]
+         (launcher/dispatch ["up" system-path "--edn"]))
+       (let [printed (read-string (str/trim (str out)))]
+         (is (true? (:aiueos.cli/ok? printed)))
+         (is (= 2 (count (:aiueos/boot-results printed))))))))
