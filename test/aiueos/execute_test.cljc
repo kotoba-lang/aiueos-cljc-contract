@@ -4,7 +4,8 @@
   aiueos.broker/verify-one, and actually EXECUTED on Chicory (no Rust,
   no wasmtime, no subprocess) -- closing the compile -> check -> emit ->
   verify -> RUN loop entirely on the JVM."
-  (:require [aiueos.execute :as execute]
+  (:require [aiueos.contract :as contract]
+            [aiueos.execute :as execute]
             [aiueos.graph :as graph]
             [aiueos.policy :as policy]
             [aiueos.topic :as topic]
@@ -326,3 +327,60 @@
            result (execute/execute-admission m empty-graph policy/default-policy memory-grow-wasm)]
        (is (= :grant (:aiueos/decision result)))
        (is (= -1 (:aiueos.execute/result result))))))
+
+;; ───────── :aiueos/run-receipt (ADR-2607022900 follow-up 8): an ADDITIVE
+;; field alongside the pre-existing :aiueos.execute/* shape -- wires
+;; aiueos.broker's pre-existing, tested run-receipt contract into the real
+;; execution path for the first time ─────────
+
+#?(:clj
+   (deftest execute-produces-a-succeeded-run-receipt-on-normal-completion
+     (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+           m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+              :aiueos/imports #{:topic/publish}}
+           result (execute/execute m empty-graph policy* topic-publish-wasm)
+           receipt (:aiueos/run-receipt result)]
+       (is (some? receipt) "run-receipt is ADDITIVE -- present alongside :aiueos.execute/result, not replacing it")
+       (is (= 42 (topic/latest (:aiueos.execute/topic-bus result) 1))
+           "the pre-existing :aiueos.execute/* shape is untouched by this change")
+       (is (= :app/topic-publish (:aiueos/component receipt)))
+       (is (= :succeeded (:aiueos/status receipt)))
+       (is (= 0 (:aiueos/result receipt)))
+       (is (nat-int? (:aiueos/started-at receipt)))
+       (is (nat-int? (:aiueos/finished-at receipt)))
+       (is (>= (:aiueos/finished-at receipt) (:aiueos/started-at receipt)))
+       (is (vector? (:aiueos/audit-events receipt))))))
+
+#?(:clj
+   (deftest execute-produces-a-denied-run-receipt-without-executing
+     (let [m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+              :aiueos/imports #{:custom/nobody-provides-this}}
+           result (execute/execute m empty-graph policy/default-policy topic-publish-wasm)
+           receipt (:aiueos/run-receipt result)]
+       (is (= :deny (:aiueos/decision result)))
+       (is (some? receipt))
+       (is (= :denied (:aiueos/status receipt)))
+       (is (not (contains? receipt :aiueos/result))))))
+
+#?(:clj
+   (deftest execute-produces-a-failed-run-receipt-when-quota-aborts-the-run
+     (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+           m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+              :aiueos/imports #{:topic/publish}
+              :aiueos/quota {:host-calls 1024 :publishes 0}}
+           result (execute/execute m empty-graph policy* topic-publish-wasm)
+           receipt (:aiueos/run-receipt result)]
+       (is (contains? result :aiueos.execute/quota-exceeded))
+       (is (some? receipt))
+       (is (= :failed (:aiueos/status receipt)))
+       (is (string? (:aiueos/error receipt))))))
+
+#?(:clj
+   (deftest run-receipt-round-trips-through-aiueos-contract-validate-run-receipt
+     (let [policy* (policy/parse-policy {:aiueos/grants {:app/topic-publish #{:topic/publish}}})
+           m {:aiueos/component :app/topic-publish :aiueos/kind :app :aiueos/trust :verified
+              :aiueos/imports #{:topic/publish}}
+           result (execute/execute m empty-graph policy* topic-publish-wasm)
+           receipt (:aiueos/run-receipt result)]
+       (is (:valid? (contract/validate-run-receipt receipt))
+           "the receipt execute produces really satisfies aiueos.contract's own shape validator"))))

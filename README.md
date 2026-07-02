@@ -60,7 +60,12 @@ contracts as adapters/providers elsewhere, but they are not authority here.
   component's `topic_publish`/`topic_poll`/`topic_take`/`topic_count` calls are
   restricted to its declared topic ids (`nil` = unrestricted); this was
   previously validated/derived by `aiueos.manifest` but never actually enforced
-  anywhere, letting a granted component access any topic id.
+  anywhere, letting a granted component access any topic id. Every result also
+  carries an ADDITIVE `:aiueos/run-receipt` (`aiueos.broker/run-receipt`,
+  ADR-2607022900 follow-up 8 — a pre-existing, tested contract `execute`
+  previously never adopted, now wired in alongside the `:aiueos.execute/*`
+  shape rather than replacing it): `:succeeded`/`:failed`/`:denied` status,
+  `:started-at`/`:finished-at` (epoch ms), and the same audit events.
   **JVM-only** — needs `clojure -M:test`, not `bb` (Chicory isn't in babashka's
   class allowlist).
 - `src/aiueos/launcher.cljc` is a real, runnable CLI: the retired Rust
