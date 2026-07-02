@@ -377,30 +377,59 @@
      returns -1 (the standard \"grow failed\" sentinel) to the GUEST's own
      code, which keeps running and decides what to do with that -1 itself
      -- same as any other Wasm runtime's memory limit, not an aiueos-
-     specific abort."
+     specific abort.
+
+     Every result also carries an ADDITIVE `:aiueos/run-receipt`
+     (`broker/run-receipt`, ADR-2607022900 follow-up 8 -- the pre-existing,
+     tested `aiueos.broker` contract this namespace previously never
+     adopted, now wired in alongside the `:aiueos.execute/*` shape rather
+     than replacing it): `:succeeded` on normal completion, `:failed` on a
+     quota/fuel/topic-forbidden abort (`:aiueos/error` set to the
+     exception's message), or `:denied` when DECISION itself was `:deny`
+     (no execution attempted). `:aiueos/started-at`/`:finished-at` are
+     epoch milliseconds; `:aiueos/audit-events` mirrors the same
+     `:aiueos.broker/audit-entries` DECISION already carried."
      ([decision wasm-bytes]
       (run-if-granted decision wasm-bytes default-quota default-fuel default-memory-pages
                        {:publishes nil :subscribes nil}))
      ([decision wasm-bytes quota fuel-limit memory-pages-limit topic-allowed]
-      (if (= :grant (:aiueos/decision decision))
-        (let [log-atom (atom [])
-              topic-bus-atom (atom topic/empty-bus)
-              instance (instantiate wasm-bytes log-atom topic-bus-atom quota fuel-limit
-                                     memory-pages-limit topic-allowed)]
-          (try
-            (let [result (call-main instance)]
-              (assoc decision
-                     :aiueos.execute/result result
-                     :aiueos.execute/log @log-atom
-                     :aiueos.execute/topic-bus @topic-bus-atom))
-            (catch clojure.lang.ExceptionInfo e
-              (if-let [[k v] (exceeded-key e)]
+      (let [component (:aiueos/component decision)
+            audit-events (:aiueos.broker/audit-entries decision)]
+        (if (= :grant (:aiueos/decision decision))
+          (let [log-atom (atom [])
+                topic-bus-atom (atom topic/empty-bus)
+                instance (instantiate wasm-bytes log-atom topic-bus-atom quota fuel-limit
+                                       memory-pages-limit topic-allowed)
+                started-at (System/currentTimeMillis)]
+            (try
+              (let [result (call-main instance)
+                    finished-at (System/currentTimeMillis)]
                 (assoc decision
-                       k v
+                       :aiueos.execute/result result
                        :aiueos.execute/log @log-atom
-                       :aiueos.execute/topic-bus @topic-bus-atom)
-                (throw e)))))
-        decision))))
+                       :aiueos.execute/topic-bus @topic-bus-atom
+                       :aiueos/run-receipt
+                       (broker/run-receipt component :succeeded
+                                            :result result :started-at started-at
+                                            :finished-at finished-at :audit-events audit-events)))
+              (catch clojure.lang.ExceptionInfo e
+                (let [finished-at (System/currentTimeMillis)]
+                  (if-let [[k v] (exceeded-key e)]
+                    (assoc decision
+                           k v
+                           :aiueos.execute/log @log-atom
+                           :aiueos.execute/topic-bus @topic-bus-atom
+                           :aiueos/run-receipt
+                           (broker/run-receipt component :failed
+                                                :error (ex-message e) :started-at started-at
+                                                :finished-at finished-at :audit-events audit-events))
+                    (throw e))))))
+          (let [now (System/currentTimeMillis)]
+            (assoc decision
+                   :aiueos/run-receipt
+                   (broker/run-receipt component :denied
+                                        :started-at now :finished-at now
+                                        :audit-events audit-events))))))))
 
 #?(:clj
    (defn execute
