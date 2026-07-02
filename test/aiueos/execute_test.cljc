@@ -11,21 +11,44 @@
             [clojure.test :refer [deftest is testing]]
             #?(:clj [clojure.string :as str])))
 
-;; The compiled Wasm binary for:
-;;   (ns demo-aiueos-execute-test)
-;;   (defn main [] (topic-publish 1 (i64 42)))
-;; built via `bin/kotoba-clj wasm emit ... --binary --policy
-;; {:kotoba.policy/capabilities #{:topic/publish}}` (kotoba-lang/kotoba).
-;; Base64-embedded (96 bytes) rather than checked in as a binary .wasm file
-;; -- this repo's .gitignore excludes *.wasm as a matter of policy (avoid
-;; binaries in git), and this fixture is small enough that inlining is the
-;; simpler, gitignore-respecting choice over a build-time compile step.
+;; Compiled Wasm binaries, base64-embedded rather than checked in as binary
+;; .wasm files -- this repo's .gitignore excludes *.wasm as a matter of
+;; policy (avoid binaries in git), and these fixtures are small enough that
+;; inlining is simpler than a build-time compile step. Each is the real
+;; output of `bin/kotoba-clj wasm emit ... --binary --policy ...`
+;; (kotoba-lang/kotoba) for the source shown in its comment.
+
+#?(:clj
+   (defn- b64->bytes [s]
+     (.decode (java.util.Base64/getDecoder) (str/replace s "\n" ""))))
+
+;; (ns demo-aiueos-execute-test)
+;; (defn main [] (topic-publish 1 (i64 42)))
 (def ^:private topic-publish-wasm-b64
   "AGFzbQEAAAABCwJgAn9+AX9gAAF/AhgBBmtvdG9iYQ10b3BpY19wdWJsaXNoAAADAgEBBQMBAAEG\nBwF/AUGAEAsHEQIEbWFpbgABBm1lbW9yeQIACgoBCABBAUIqEAAL")
 
+;; (ns demo-aiueos-irq)
+;; (defn main [] (irq-subscribe 33))
+(def ^:private irq-subscribe-wasm-b64
+  "AGFzbQEAAAABCgJgAX8BfmAAAX4CGAEGa290b2JhDWlycV9zdWJzY3JpYmUAAAMCAQEFAwEAAQYH\nAX8BQYAQCwcRAgRtYWluAAEGbWVtb3J5AgAKCAEGAEEhEAAL")
+
+;; (ns demo-aiueos-mmio)
+;; (defn main [] (mmio-map (i64 0) 4096))
+(def ^:private mmio-map-wasm-b64
+  "AGFzbQEAAAABCwJgAn5/AX5gAAF+AhMBBmtvdG9iYQhtbWlvX21hcAAAAwIBAQUDAQABBgcBfwFB\ngBALBxECBG1haW4AAQZtZW1vcnkCAAoLAQkAQgBBgCAQAAs=")
+
+;; (ns demo-aiueos-dma)
+;; (defn main [] (dma-map 0 4096))
+(def ^:private dma-map-wasm-b64
+  "AGFzbQEAAAABCwJgAn9/AX5gAAF+AhIBBmtvdG9iYQdkbWFfbWFwAAADAgEBBQMBAAEGBwF/AUGA\nEAsHEQIEbWFpbgABBm1lbW9yeQIACgsBCQBBAEGAIBAACw==")
+
+;; (ns demo-aiueos-pci)
+;; (defn main [] (pci-config 0 16))
+(def ^:private pci-config-wasm-b64
+  "AGFzbQEAAAABCwJgAn9/AX9gAAF/AhUBBmtvdG9iYQpwY2lfY29uZmlnAAADAgEBBQMBAAEGBwF/\nAUGAEAsHEQIEbWFpbgABBm1lbW9yeQIACgoBCABBAEEQEAAL")
+
 #?(:clj
-   (def topic-publish-wasm
-     (.decode (java.util.Base64/getDecoder) (str/replace topic-publish-wasm-b64 "\n" ""))))
+   (def topic-publish-wasm (b64->bytes topic-publish-wasm-b64)))
 
 (def empty-graph (graph/build []))
 
@@ -62,3 +85,29 @@
               :aiueos/imports #{:topic/publish}}
            result (execute/execute m empty-graph policy* topic-publish-wasm)]
        (is (= [] (:aiueos.execute/log result))))))
+
+;; ───────── device-access quartet: stubs really execute through the full
+;; compile -> decide -> Chicory pipeline, not just link-check ─────────
+
+#?(:clj
+   (def device-access-execute-demos
+     "pci/config, dma/map, irq/subscribe, mmio/map are all default kernel
+     caps (aiueos.policy/default-kernel-caps) -- no explicit grant needed,
+     same as topic/publish above. Each stub always returns 0 (see
+     aiueos.execute/device-access-stub); this proves that return value
+     really comes back through a live Chicory call, not just a static
+     assumption."
+     [{:component :app/irq :capability :irq/subscribe :wasm (b64->bytes irq-subscribe-wasm-b64)}
+      {:component :app/mmio :capability :mmio/map :wasm (b64->bytes mmio-map-wasm-b64)}
+      {:component :app/dma :capability :dma/map :wasm (b64->bytes dma-map-wasm-b64)}
+      {:component :app/pci :capability :pci/config :wasm (b64->bytes pci-config-wasm-b64)}]))
+
+#?(:clj
+   (deftest device-access-quartet-executes-through-chicory-and-stub-returns-zero
+     (doseq [{:keys [component capability wasm]} device-access-execute-demos]
+       (let [m {:aiueos/component component :aiueos/kind :app :aiueos/trust :verified
+                :aiueos/imports #{capability}}
+             result (execute/execute m empty-graph policy/default-policy wasm)]
+         (is (= :grant (:aiueos/decision result)) component)
+         (is (= 0 (:aiueos.execute/result result))
+             (str component ": device-access stub must return 0 through a real Chicory call"))))))
