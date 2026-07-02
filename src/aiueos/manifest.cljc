@@ -199,6 +199,28 @@
      :aiueos.manifest/deadline-cycles (ceil-cycles deadline-ms)
      :aiueos.manifest/priority priority}))
 
+(defn due-this-cycle?
+  "Whether a component whose normalized `:aiueos/schedule` is SCHEDULE (the
+  `{:aiueos.manifest/period-cycles ...}` map `normalize-schedule` produces)
+  is due to run at CYCLE (a non-negative cycle counter -- ADR-0006's
+  cycle-based control loop, not wall-clock time). Cycle 0 is due for every
+  period (a component always runs at least once, at boot); afterward a
+  component with `:period-cycles N` is due every Nth cycle.
+
+  NOTE what this does NOT do: `:aiueos.manifest/deadline-cycles` (how many
+  cycles a run may take once started) is NOT enforced here or anywhere in
+  this codebase yet -- ADR-0006 deliberately keeps the control loop
+  wall-clock-free, but `aiueos.execute`'s Chicory calls are synchronous
+  and non-preemptible (a component's `main` runs to completion in one
+  call; there's no mechanism to pause it mid-execution at a cycle
+  boundary and check elapsed cycles against a deadline). Enforcing
+  `:deadline-cycles` for real would need either true incremental/
+  interruptible execution or a wall-clock proxy that violates ADR-0006's
+  own \"no wall clock in the control loop\" principle -- this is a real,
+  currently-unaddressed gap, not silently treated as solved."
+  [schedule cycle]
+  (zero? (mod cycle (:aiueos.manifest/period-cycles schedule))))
+
 ;; -----------------------------------------------------------------------
 ;; topics + publish/subscribe derivation
 ;; -----------------------------------------------------------------------

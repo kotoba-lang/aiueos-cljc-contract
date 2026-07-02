@@ -154,3 +154,30 @@
                 (assoc depth i d)))
             (vec (repeat n 0))
             order)))
+
+(defn priority-boot-order
+  "Like `boot-order`, but within each dependency-depth level (components
+  with no provider->consumer relationship among them -- `depths`'s own
+  docstring: \"the scheduler may reorder them by priority without breaking
+  dataflow\", ADR-0006), orders by PRIORITIES ascending (lower =
+  more urgent) instead of the arbitrary within-depth order the Kahn's-
+  algorithm traversal in `boot-order` happens to produce.
+
+  PRIORITIES is a vector of ints parallel to COMPONENTS (e.g.
+  `(mapv #(get-in % [:aiueos/schedule :aiueos.manifest/priority])
+  normalized-manifests)`). This stays a valid topological order: sorting
+  primarily by depth keeps every depth-group fully ordered before the
+  next (providers strictly precede consumers, since a provider's depth is
+  always < its consumer's), and priority only reorders WITHIN a
+  depth-group, where `depths` already guarantees no dependency edges
+  exist to violate.
+
+  Returns the same shape as `boot-order` (`{:aiueos.graph/order [...]}` or
+  `{:aiueos.graph/cycle [...]}`, unchanged on a cycle since there's no
+  valid order to reorder)."
+  [components priorities]
+  (let [order-result (boot-order components)]
+    (if-let [order (:aiueos.graph/order order-result)]
+      (let [ds (depths components)]
+        {:aiueos.graph/order (vec (sort-by (fn [i] [(nth ds i) (nth priorities i)]) order))})
+      order-result)))

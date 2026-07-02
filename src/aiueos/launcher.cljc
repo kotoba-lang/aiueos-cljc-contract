@@ -156,50 +156,67 @@
 
 #?(:clj
    (defn up-command
-     "The `up` command body: boot every component of SYSTEM-PATH in
-     dependency order (`aiueos.graph/boot-order`) -- providers before
-     consumers. Each component is verified + (if granted and it declares
+     "The `up` command body: boot the components of SYSTEM-PATH that are
+     DUE at SCHED-CYCLE (a non-negative ADR-0006 cycle counter, defaulting
+     to 0 -- see `aiueos.manifest/due-this-cycle?`; cycle 0 is always due
+     for every component, so the default invocation boots everyone, same
+     as before scheduling existed). Boot order is
+     `aiueos.graph/priority-boot-order` -- dependency order (providers
+     before consumers) with same-depth components ordered by
+     `:aiueos/schedule`'s `:priority` (lower = more urgent). A component
+     not due this cycle is simply skipped (omitted from
+     `:aiueos/boot-results`, not treated as stopped/denied).
+
+     Each due component is verified + (if granted and it declares
      `:aiueos/wasm`) actually executed via `aiueos.execute/execute`,
      exactly like `run-command` does for a single manifest; a component
      with no `:aiueos/wasm` (a pure capability provider with nothing to
      run) only gets a decision, matching `verify-command`.
 
-     Stops at the FIRST denied/quota-or-fuel-exceeded component -- a
+     Stops at the FIRST denied/quota-or-fuel-exceeded DUE component -- a
      system doesn't boot past a component that can't run, since later
      components may depend on it. Returns `{:aiueos.cli/ok? true
-     :aiueos/boot-results [...]}` on a clean boot (every component
-     reached, in boot order) or `{:aiueos.cli/ok? false
-     :aiueos/boot-results [...] :aiueos/stopped-at <component-id>}` when
-     boot halted early. A dependency CYCLE (no valid boot order exists)
-     is reported as `{:aiueos.cli/ok? false :aiueos.cli/code
-     :graph/cycle :aiueos/cycle [component-ids...]}` before anything
-     executes."
-     [system-path policy-path]
-     (let [entries (load-system-entries system-path)
-           manifests (mapv :aiueos/manifest entries)
-           policy* (load-policy policy-path)
-           g (graph/build manifests)
-           order-result (graph/boot-order manifests)]
-       (if-let [cycle (:aiueos.graph/cycle order-result)]
-         {:aiueos.cli/command :up :aiueos.cli/ok? false :aiueos.cli/code :graph/cycle
-          :aiueos/cycle cycle}
-         (loop [indices (get-in order-result [:aiueos.graph/order]) results []]
-           (if (empty? indices)
-             {:aiueos.cli/command :up :aiueos.cli/ok? true :aiueos/boot-results results}
-             (let [i (first indices)
-                   {:aiueos.launcher/keys [path] :aiueos/keys [manifest]} (nth entries i)
-                   wasm-path (resolve-wasm-path path manifest)
-                   result (if wasm-path
-                            (execute/execute manifest g policy* (read-wasm-bytes wasm-path))
-                            (broker/verify-one manifest g policy*))
-                   results' (conj results result)
-                   booted? (and (= :grant (:aiueos/decision result))
-                                (not (contains? result :aiueos.execute/quota-exceeded))
-                                (not (contains? result :aiueos.execute/fuel-exceeded)))]
-               (if booted?
-                 (recur (rest indices) results')
-                 {:aiueos.cli/command :up :aiueos.cli/ok? false :aiueos/boot-results results'
-                  :aiueos/stopped-at (:aiueos/component manifest)}))))))))
+     :aiueos/boot-results [...]}` on a clean boot (every due component
+     reached) or `{:aiueos.cli/ok? false :aiueos/boot-results [...]
+     :aiueos/stopped-at <component-id>}` when boot halted early. A
+     dependency CYCLE (no valid boot order exists) is reported as
+     `{:aiueos.cli/ok? false :aiueos.cli/code :graph/cycle :aiueos/cycle
+     [component-ids...]}` before anything executes.
+
+     NOTE: `:aiueos/schedule`'s `:aiueos.manifest/deadline-cycles` is NOT
+     enforced -- see `aiueos.manifest/due-this-cycle?`'s docstring for why
+     (Chicory's synchronous, non-preemptible execution has no mechanism
+     to check elapsed cycles mid-run)."
+     ([system-path policy-path] (up-command system-path policy-path 0))
+     ([system-path policy-path sched-cycle]
+      (let [entries (load-system-entries system-path)
+            manifests (mapv :aiueos/manifest entries)
+            priorities (mapv #(get-in % [:aiueos/schedule :aiueos.manifest/priority]) manifests)
+            policy* (load-policy policy-path)
+            g (graph/build manifests)
+            order-result (graph/priority-boot-order manifests priorities)]
+        (if-let [cycle (:aiueos.graph/cycle order-result)]
+          {:aiueos.cli/command :up :aiueos.cli/ok? false :aiueos.cli/code :graph/cycle
+           :aiueos/cycle cycle}
+          (loop [indices (get-in order-result [:aiueos.graph/order]) results []]
+            (if (empty? indices)
+              {:aiueos.cli/command :up :aiueos.cli/ok? true :aiueos/boot-results results}
+              (let [i (first indices)
+                    {:aiueos.launcher/keys [path] :aiueos/keys [manifest]} (nth entries i)]
+                (if-not (manifest/due-this-cycle? (:aiueos/schedule manifest) sched-cycle)
+                  (recur (rest indices) results)
+                  (let [wasm-path (resolve-wasm-path path manifest)
+                        result (if wasm-path
+                                 (execute/execute manifest g policy* (read-wasm-bytes wasm-path))
+                                 (broker/verify-one manifest g policy*))
+                        results' (conj results result)
+                        booted? (and (= :grant (:aiueos/decision result))
+                                     (not (contains? result :aiueos.execute/quota-exceeded))
+                                     (not (contains? result :aiueos.execute/fuel-exceeded)))]
+                    (if booted?
+                      (recur (rest indices) results')
+                      {:aiueos.cli/command :up :aiueos.cli/ok? false :aiueos/boot-results results'
+                       :aiueos/stopped-at (:aiueos/component manifest)})))))))))))
 
 #?(:clj
    (defn surface-command
@@ -274,10 +291,10 @@
      `audit [--log <path>] [--event <kw>] [--component <kw>] [--edn]` --
      query the append-only audit log (defaults to `.aiueos/audit.edn`
      under the current directory).
-     `up <system-path> [--policy <path>] [--edn]` -- boot every component
-     of a system in dependency order, executing each as it's reached
-     (`up-command`); stops at the first denied/quota-or-fuel-exceeded
-     component.
+     `up <system-path> [--policy <path>] [--cycle <n>] [--edn]` -- boot the
+     components due at cycle N (default 0, ADR-0006; see `up-command`) in
+     priority-aware dependency order, executing each as it's reached;
+     stops at the first denied/quota-or-fuel-exceeded DUE component.
 
      The adapter-only six (`sign`/`check`/`compile`/`hash`/`image`/`vm`)
      are not wired here -- `check`/`compile` delegate to
@@ -294,7 +311,9 @@
          :inspect (print-result (inspect-command (first positionals)) edn?)
          :surface (print-result (surface-command (or (first positionals) (:id options))) edn?)
          :audit (print-result (audit-command (:log options) (:event options) (:component options)) edn?)
-         :up (print-result (up-command (first positionals) (:policy options)) edn?)
+         :up (print-result (up-command (first positionals) (:policy options)
+                                        (if-let [c (:cycle options)] (Long/parseLong c) 0))
+                            edn?)
          (do (binding [*out* *err*]
                (println (str "aiueos: unsupported or not-yet-wired command `" (name command) "`"))
                (println "supported: verify, run, admit, inspect, surface, audit, up"))

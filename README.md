@@ -12,7 +12,9 @@ contracts as adapters/providers elsewhere, but they are not authority here.
 ## Contract Data
 
 - `src/aiueos/contract.cljc` validates the pure aiueos data contracts.
-- `src/aiueos/graph.cljc` derives capability providers, boot order, and dependency depth.
+- `src/aiueos/graph.cljc` derives capability providers, boot order (`boot-order`,
+  and `priority-boot-order` — same order with same-depth components sorted by
+  `:aiueos/schedule` priority, ADR-0006), and dependency depth.
 - `src/aiueos/policy.cljc` resolves grants, surface policy, and component admission.
 - `src/aiueos/surface.cljc` owns the known deployment surface/provider registry.
 - `src/aiueos/manifest.cljc` normalizes a manifest's trust/limits/quota/schedule/topic defaults.
@@ -59,12 +61,18 @@ contracts as adapters/providers elsewhere, but they are not authority here.
   `aiueos.execute`/`aiueos.audit` together. `verify`/`run`/`admit`/`inspect`/
   `surface`/`audit`/`up` are wired today (`run`/`admit` actually execute a
   granted component's declared `:aiueos/wasm`, not just decide; `up` boots
-  every component of a system in `aiueos.graph/boot-order` — providers
-  before consumers — executing each as it's reached, stopping at the first
-  denied/quota-or-fuel-exceeded component). Try it:
-  `clojure -M -m aiueos.launcher up <system>.edn --edn`. **JVM-only**, same
-  reason as `aiueos.execute`. Not wired: the adapter-only six
-  (`sign`/`check`/`compile`/`hash`/`image`/`vm`).
+  the components due at a given ADR-0006 cycle (`--cycle N`, default 0 —
+  boots everyone, matching the pre-scheduling default) in
+  `aiueos.graph/priority-boot-order` — dependency order with same-depth
+  components ordered by `:aiueos/schedule`'s `:priority` — stopping at the
+  first denied/quota-or-fuel-exceeded DUE component). Try it:
+  `clojure -M -m aiueos.launcher up <system>.edn --cycle 3 --edn`.
+  **`:aiueos/schedule`'s `:deadline-cycles` is NOT enforced** — see
+  `aiueos.manifest/due-this-cycle?`'s docstring for why (Chicory's
+  synchronous, non-preemptible execution has no mechanism to check
+  elapsed cycles mid-run). **JVM-only**, same reason as `aiueos.execute`.
+  Not wired: the adapter-only six (`sign`/`check`/`compile`/`hash`/
+  `image`/`vm`).
 - `resources/aiueos/component_boundary.edn` owns the component imports/exports.
 - `resources/aiueos/policy_contract.edn` / `broker_contract.edn` own the policy/broker decision tables.
 - `resources/aiueos/cli.edn` owns the CLI command/option contract.

@@ -127,6 +127,20 @@
   (is (= 10 (:aiueos.manifest/priority
              (manifest/normalize-schedule {:aiueos/schedule {:priority 10}})))))
 
+(deftest due-this-cycle-is-always-due-at-cycle-zero
+  (testing "a component always runs at least once, at boot, regardless of period"
+    (let [sched (manifest/normalize-schedule {:aiueos/schedule {:period-ms 10 :cycle-ms 1}})]
+      (is (true? (manifest/due-this-cycle? sched 0))))))
+
+(deftest due-this-cycle-fires-every-period-cycles
+  (let [sched (manifest/normalize-schedule {:aiueos/schedule {:period-ms 5 :cycle-ms 1}})]
+    (is (= [true false false false false true false false false false true]
+           (mapv #(manifest/due-this-cycle? sched %) (range 11))))))
+
+(deftest due-this-cycle-default-schedule-is-due-every-cycle
+  (let [sched (manifest/normalize-schedule {})]
+    (is (every? true? (mapv #(manifest/due-this-cycle? sched %) (range 5))))))
+
 ;; -----------------------------------------------------------------------
 ;; topic id derivation
 ;; -----------------------------------------------------------------------
