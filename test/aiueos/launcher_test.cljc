@@ -242,3 +242,69 @@
        (let [printed (read-string (str/trim (str out)))]
          (is (true? (:aiueos.cli/ok? printed)))
          (is (= 2 (count (:aiueos/boot-results printed))))))))
+
+;; ───────── up-command + ADR-0006 cycle-based scheduling ─────────
+
+#?(:clj
+   (defn- write-two-component-system-with-schedule!
+     "Same fs/app system as write-two-component-system!, but app declares
+     :aiueos/schedule {:period-ms 3 :cycle-ms 1} -- due only every 3rd
+     cycle (0, 3, 6, ...). fs has no explicit schedule (default: due every
+     cycle), matching a real system where an always-on capability
+     provider coexists with a periodic consumer."
+     [dir]
+     (let [wasm-bytes (.decode (java.util.Base64/getDecoder)
+                                (str/replace topic-publish-wasm-b64 "\n" ""))
+           fs-manifest (io/file dir "fs.edn")
+           app-manifest (io/file dir "app.edn")
+           app-wasm (io/file dir "topic_publish.wasm")
+           system-file (io/file dir "system.edn")]
+       (spit fs-manifest (pr-str {:aiueos/component :service/fs :aiueos/kind :service
+                                   :aiueos/exports #{:fs/read} :aiueos/imports #{}}))
+       (io/copy wasm-bytes app-wasm)
+       (spit app-manifest (pr-str {:aiueos/component :app/topic-publish :aiueos/kind :app
+                                    :aiueos/trust :verified :aiueos/wasm "topic_publish.wasm"
+                                    :aiueos/imports #{:fs/read :topic/publish} :aiueos/exports #{}
+                                    :aiueos/schedule {:period-ms 3 :cycle-ms 1}}))
+       (spit system-file (pr-str {:aiueos/system :demo :aiueos/components ["fs.edn" "app.edn"]}))
+       (.getPath system-file))))
+
+#?(:clj
+   (deftest up-command-defaults-to-cycle-zero-booting-everyone
+     (testing "no explicit cycle arg -- matches pre-scheduling up-command
+     behavior exactly, since cycle 0 is due for every period"
+       (let [dir (temp-dir)
+             system-path (write-two-component-system-with-schedule! dir)
+             result (launcher/up-command system-path nil)]
+         (is (true? (:aiueos.cli/ok? result)))
+         (is (= 2 (count (:aiueos/boot-results result))))))))
+
+#?(:clj
+   (deftest up-command-skips-a-component-not-due-this-cycle
+     (testing "app's :period-ms 3 means it's due at cycles 0/3/6/...; at
+     cycle 1 it's skipped, fs (default: due every cycle) still boots"
+       (let [dir (temp-dir)
+             system-path (write-two-component-system-with-schedule! dir)
+             result (launcher/up-command system-path nil 1)]
+         (is (true? (:aiueos.cli/ok? result)))
+         (is (= 1 (count (:aiueos/boot-results result))))
+         (is (= :service/fs (:aiueos/component (first (:aiueos/boot-results result)))))))))
+
+#?(:clj
+   (deftest up-command-boots-the-periodic-component-again-at-its-next-due-cycle
+     (let [dir (temp-dir)
+           system-path (write-two-component-system-with-schedule! dir)
+           result (launcher/up-command system-path nil 3)]
+       (is (true? (:aiueos.cli/ok? result)))
+       (is (= 2 (count (:aiueos/boot-results result)))
+           "cycle 3 is due for app again (period-cycles 3), fs is always due"))))
+
+#?(:clj
+   (deftest dispatch-drives-up-with-an-explicit-cycle-via-argv
+     (let [dir (temp-dir)
+           system-path (write-two-component-system-with-schedule! dir)
+           out (java.io.StringWriter.)]
+       (binding [*out* out]
+         (launcher/dispatch ["up" system-path "--cycle" "1" "--edn"]))
+       (let [printed (read-string (str/trim (str out)))]
+         (is (= 1 (count (:aiueos/boot-results printed))))))))

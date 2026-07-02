@@ -44,6 +44,30 @@
     (is (= 1 (nth d 0))) ; notes-app: depends on both, depth = 1 + max(0,0)
     ))
 
+(deftest priority-boot-order-reorders-within-a-depth-level-only
+  (testing "log-service and fs-service are both depth 0 (no dependency
+  between them) -- priority-boot-order sorts them by priority (lower =
+  more urgent) even though plain boot-order's within-depth order is
+  arbitrary. notes-app is depth 1 and must still come last regardless of
+  its own priority, since it depends on both."
+    (let [components [notes-app log-service fs-service]
+          priorities [100 5 50] ; notes-app=100, log-service=5 (most urgent), fs-service=50
+          {:keys [aiueos.graph/order]} (graph/priority-boot-order components priorities)]
+      (is (= [1 2 0] order)
+          "log-service (idx 1, priority 5) before fs-service (idx 2, priority 50), both before notes-app (idx 0, depth 1)"))))
+
+(deftest priority-boot-order-reverses-when-priorities-flip
+  (let [components [notes-app log-service fs-service]
+        priorities [100 50 5]] ; fs-service now most urgent
+    (let [{:keys [aiueos.graph/order]} (graph/priority-boot-order components priorities)]
+      (is (= [2 1 0] order)))))
+
+(deftest priority-boot-order-returns-a-cycle-unchanged
+  (let [a {:aiueos/component :a :aiueos/exports #{:cap/a} :aiueos/imports #{:cap/b}}
+        b {:aiueos/component :b :aiueos/exports #{:cap/b} :aiueos/imports #{:cap/a}}
+        result (graph/priority-boot-order [a b] [1 2])]
+    (is (contains? result :aiueos.graph/cycle))))
+
 (deftest check-unique-ids-rejects-duplicates
   (is (nil? (graph/check-unique-ids [log-service fs-service])))
   (is (= :duplicate-component-id
