@@ -1,4 +1,6 @@
 {:paths ["src" "resources"]
+ :deps {com.dylibso.chicory/wasm {:mvn/version "1.4.0"}
+        com.dylibso.chicory/runtime {:mvn/version "1.4.0"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
