@@ -1,4 +1,4 @@
-#:aiueos.policy{:source-files [],
+#:aiueos.policy{:source-files ["src/aiueos/policy.cljc" "src/aiueos/graph.cljc" "src/aiueos/surface.cljc"],
                 :grant-fields
                 [:aiueos/subject
                  :aiueos/audience

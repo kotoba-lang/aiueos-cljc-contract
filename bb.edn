@@ -3,11 +3,11 @@
  {test
   {:doc "Run the pure CLJC authority contract tests."
    :task (do
-           (require 'aiueos.contract-test)
-           (clojure.test/run-tests 'aiueos.contract-test))}
+           (require 'aiueos.contract-test 'aiueos.surface-test 'aiueos.graph-test 'aiueos.policy-test)
+           (clojure.test/run-tests 'aiueos.contract-test 'aiueos.surface-test 'aiueos.graph-test 'aiueos.policy-test))}
 
   test:cljc
   {:doc "Run the pure CLJC authority contract tests."
    :task (do
-           (require 'aiueos.contract-test)
-           (clojure.test/run-tests 'aiueos.contract-test))}}}
+           (require 'aiueos.contract-test 'aiueos.surface-test 'aiueos.graph-test 'aiueos.policy-test)
+           (clojure.test/run-tests 'aiueos.contract-test 'aiueos.surface-test 'aiueos.graph-test 'aiueos.policy-test))}}}
