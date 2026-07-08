@@ -106,3 +106,14 @@ was NOT ported because it's redundant — that check already lives in
 clojure -M:test   # full suite, including aiueos.execute-test (Chicory, JVM-only)
 bb test:cljc      # everything except aiueos.execute-test
 ```
+
+## Maturity
+
+Tracked M0-M6 in `docs/coverage.edn` (template borrowed from
+`kotoba-lang/kotoba-lang`'s `docs/lang/coverage.edn`). Currently at M4:
+positive and negative fixtures are both extensive (every validator/reasoner
+has deny-path tests, not just happy-path), CI runs the full suite on JDK
+17 + 21. M5 (external-implementation-suite) is marked `:ambiguous` — see
+the note in `docs/coverage.edn` about `kototama`'s dependency pointing at a
+stale duplicate of this repo's `src/aiueos/` living in `kotoba-lang/aiueos`
+rather than at this repo. M6 (compatibility policy) is not yet written.

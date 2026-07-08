@@ -1,0 +1,76 @@
+{:aiueos.coverage/version 1
+ :maturity :m4
+ ;; M0-M6 template borrowed from kotoba-lang/kotoba-lang's docs/lang/coverage.edn.
+ :stages
+ [{:stage :m0
+   :name "constants-and-docs"
+   :evidence ["README.md"
+              "90-docs/adr/0001-aiueos-phase0-capability-os.md"
+              "90-docs/adr/0002-host-abi-topic-bus.md"]}
+  {:stage :m1
+   :name "machine-readable-contracts"
+   :evidence ["resources/aiueos/component_boundary.edn"
+              "resources/aiueos/policy_contract.edn"
+              "resources/aiueos/broker_contract.edn"
+              "resources/aiueos/cli.edn"
+              "src/aiueos/contract.cljc"]}
+  {:stage :m2
+   :name "positive-fixtures"
+   :evidence ["test/aiueos/broker_test.cljc"
+              "test/aiueos/policy_test.cljc"
+              "test/aiueos/graph_test.cljc"
+              "test/aiueos/signing_test.cljc"
+              "test/aiueos/decide_test.cljc"
+              "test/aiueos/execute_test.cljc"]}
+  {:stage :m3
+   :name "negative-fixtures"
+   :evidence ["test/aiueos/broker_test.cljc:verify-one-denies-and-audits-every-violation"
+              "test/aiueos/broker_test.cljc:run-plan-omits-grant-on-deny"
+              "test/aiueos/signing_test.cljc:signature-without-signer-is-a-bad-signature-violation"
+              "test/aiueos/signing_test.cljc:unregistered-signer-is-a-bad-signature-violation"
+              "test/aiueos/signing_test.cljc:malformed-signature-hex-is-a-violation-not-a-thrown-exception"
+              "test/aiueos/graph_test.cljc:check-unique-ids-rejects-duplicates"
+              "test/aiueos/graph_test.cljc:check-unique-devices-rejects-conflicting-bindings"
+              "test/aiueos/policy_test.cljc:dma-without-iommu-is-denied"
+              "test/aiueos/decide_test.cljc:handle-request-rejects-a-request-missing-command"
+              "test/aiueos/execute_test.cljc:execute-produces-a-denied-run-receipt-without-executing"
+              "test/aiueos/launcher_test.cljc:up-command-stops-at-the-first-denied-component"]}
+  {:stage :m4
+   :name "ci-gated-runner"
+   :evidence [".github/workflows/ci.yml"
+              "clojure -M:test / bb test:cljc: 190 tests, 525 assertions green (2026-07-08)"]}
+  {:stage :m5
+   :name "external-implementation-suite"
+   :status :ambiguous
+   :note "kotoba-lang/kototama's src/kototama/aiueos_adapter.clj requires
+          `aiueos.cli` and its deps.edn depends on
+          io.github.kotoba-lang/aiueos (git@github.com:kotoba-lang/
+          aiueos.git) -- NOT io.github.kotoba-lang/aiueos-cljc-contract.
+          Investigating found kotoba-lang/aiueos's GitHub repo (the
+          'examples/deployment, not authority' repo per ITS OWN README)
+          still carries its own src/aiueos/{audit,broker,cli,contract,
+          decide,graph,manifest,policy,signing,surface,topic}.cljc --  a
+          near-complete but slightly stale duplicate of this repo's src/
+          aiueos/ (missing execute.cljc and launcher.cljc, which only
+          exist here). So kototama's real dependency target is this
+          STALE DUPLICATE living in a different repo than the one whose
+          README claims authority, not this repo. This is a genuine
+          consolidation gap across the aiueos-cljc-contract / aiueos
+          repo split, not something this maturity pass fixes -- flagged
+          for a follow-up decision (repoint kototama's dep, or delete
+          kotoba-lang/aiueos's duplicate src/aiueos/ now that this repo
+          is current). Separately, this investigation also found and
+          fixed two local checkouts (orgs/kotoba-lang/aiueos and
+          orgs/kotoba-lang/aiueos-cljc-contract) whose `origin` git
+          remotes were misconfigured to point at each other's GitHub
+          repos -- a plain metadata bug, unrelated to the source
+          duplication itself, already corrected."
+   :evidence []}
+  {:stage :m6
+   :name "compatibility-policy"
+   :status :not-yet
+   :note "No versioning.md-equivalent exists. CHANGELOG.md self-labels
+          pre-1.0 (Phase-0); several ADRs (0005, 0006) are explicitly
+          not-yet-implemented phases, so a compatibility policy would be
+          premature until those land."
+   :evidence []}]}

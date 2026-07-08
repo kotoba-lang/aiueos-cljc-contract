@@ -1,4 +1,4 @@
-# ADR-0007 — The `computer` surface: capability-isolated computer-use
+# ADR-0010 — The `computer` surface: capability-isolated computer-use
 
 - Status: accepted — implemented (Phase 3, builds on ADR-0005)
 - Date: 2026-06-28 (implemented 2026-06-29)
