@@ -48,6 +48,61 @@
     (coll? x) (set x)
     :else #{x}))
 
+;; ───────── signer trust store (ADR-2606290900, informed by ADR-2607022400's
+;; EROS/KeyKOS microkernel survey: revocation is "unadopt", never "erase") ─────────
+
+(def signer-statuses
+  "ADR-2606290900's signer lifecycle states. `:rotated` and `:revoked` both
+  invalidate DIRECT trust in the key -- rotation-chain following (trusting
+  whatever `:aiueos.signer/rotated-to` now points at) is ADR-2606290900's K4,
+  future work, not implemented here."
+  #{:active :rotated :revoked})
+
+(defn signer-entry
+  "Normalize a raw `:aiueos.policy/signers` registry value into a full
+  trust-store entry map. A plain hex-string value -- the legacy flat
+  registry shape every existing policy/manifest in this repo already uses --
+  becomes an always-`:active`, unbounded-validity entry. Fully backward
+  compatible: policies that never adopted lifecycle fields behave exactly as
+  before."
+  [raw]
+  (cond
+    (string? raw) {:aiueos.signer/public-key raw :aiueos.signer/status :active}
+    (map? raw) (merge {:aiueos.signer/status :active} raw)
+    :else nil))
+
+(defn signer-status-ok?
+  "True unless the signer's trust-store status is `:revoked` or `:rotated`."
+  [entry]
+  (= :active (:aiueos.signer/status entry :active)))
+
+(defn signer-in-window?
+  "True if `now` (epoch seconds) falls within the entry's
+  `:aiueos.signer/valid-from`/`:aiueos.signer/valid-until` window, or either
+  bound is nil (unbounded). `now` itself may be nil -- a caller with no
+  clock available (or that doesn't care to enforce expiry) skips only this
+  time check; `signer-status-ok?`'s revocation check is unconditional and
+  always applies regardless of clock availability."
+  [entry now]
+  (or (nil? now)
+      (let [from (:aiueos.signer/valid-from entry)
+            until (:aiueos.signer/valid-until entry)]
+        (and (or (nil? from) (>= now from))
+             (or (nil? until) (< now until))))))
+
+(defn signer-trusted?
+  "The `not_revoked ∧ not_expired` clauses of ADR-2606290900's trust
+  formula (`signature_valid ∧ not_expired ∧ not_revoked ∧
+  issuer_trusted_for`) -- signature validity itself is
+  `aiueos.signing/verify`'s job, not this namespace's. `nil` if `signer-id`
+  isn't registered at all (distinct from `false` for a registered-but-
+  invalid signer, though callers needing only a yes/no answer can treat
+  both as untrusted)."
+  [policy signer-id now]
+  (when-let [raw (get (:aiueos.policy/signers policy) signer-id)]
+    (let [entry (signer-entry raw)]
+      (boolean (and entry (signer-status-ok? entry) (signer-in-window? entry now))))))
+
 (defn parse-policy
   "Parse a deployment policy overlay (the `:aiueos/*` EDN validated by
   `aiueos.contract/validate-deployment-policy`) into an effective policy.

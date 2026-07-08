@@ -59,28 +59,42 @@
   (and (map? x) (contains? x :aiueos/kind)))
 
 (defn authenticate
-  "Verify `m`'s signature against `policy` (ADR-0003). Returns one of:
+  "Verify `m`'s signature against `policy` (ADR-0003), THEN check the
+  signer's trust-store lifecycle (ADR-2606290900's `not_revoked ∧
+  not_expired` clauses, via `aiueos.policy/signer-trusted?` -- pass `now`,
+  epoch seconds, to enforce the expiry window; omit/nil to check revocation
+  status only). Returns one of:
   - `{:aiueos.broker/signer nil}` — unsigned, allowed (policy doesn't
     require signatures).
-  - `{:aiueos.broker/signer signer-id}` — a valid signature names a
-    registered signer.
+  - `{:aiueos.broker/signer signer-id}` — a valid, currently-trusted
+    signature names a registered, non-revoked, non-expired signer.
   - a violation map `{:aiueos/component id :aiueos/kind :bad-signature
     :aiueos/message \"...\"}` — unsigned under a `:aiueos.policy/require-signed`
-    policy, or the signature is missing context / unregistered / forged.
-    A bad signature is NEVER downgraded to unsigned."
-  [m policy]
-  (let [status (signing/verify m policy)]
-    (cond
-      (signing/violation? status) status
+    policy, the signature is missing context / unregistered / forged, OR
+    the signature is cryptographically valid but the signer has since been
+    revoked/rotated/expired. A bad signature is NEVER downgraded to
+    unsigned -- and neither is a revoked one."
+  ([m policy] (authenticate m policy nil))
+  ([m policy now]
+   (let [status (signing/verify m policy)]
+     (cond
+       (signing/violation? status) status
 
-      (and (signing/unsigned? status) (:aiueos.policy/require-signed policy))
-      {:aiueos/component (:aiueos/component m)
-       :aiueos/kind :bad-signature
-       :aiueos/message "unsigned component rejected (require-signed policy)"}
+       (and (signing/unsigned? status) (:aiueos.policy/require-signed policy))
+       {:aiueos/component (:aiueos/component m)
+        :aiueos/kind :bad-signature
+        :aiueos/message "unsigned component rejected (require-signed policy)"}
 
-      (signing/unsigned? status) {:aiueos.broker/signer nil}
+       (signing/unsigned? status) {:aiueos.broker/signer nil}
 
-      (signing/verified? status) {:aiueos.broker/signer (:aiueos.signing/signer status)})))
+       (signing/verified? status)
+       (let [signer (:aiueos.signing/signer status)]
+         (if (policy/signer-trusted? policy signer now)
+           {:aiueos.broker/signer signer}
+           {:aiueos/component (:aiueos/component m)
+            :aiueos/kind :bad-signature
+            :aiueos/message (str "signer `" (str signer)
+                                  "` is revoked, rotated, or outside its validity window")}))))))
 
 (defn elevate-for-signature
   "A signature elevates an under-trusted component to `:verified` for the
@@ -107,31 +121,35 @@
 
 (defn verify-one
   "Verify a single component manifest `m` against `graph` and `policy`.
-  Runs signature authenticity first (ADR-0003): a bad signature (or an
-  unsigned component under a require-signed policy) denies outright without
-  reaching the capability check; a valid signature elevates an
-  under-trusted component to `:verified` before `aiueos.policy/verify-component`
-  runs.
+  Runs signature authenticity first (ADR-0003 + ADR-2606290900's revocation/
+  expiry trust-store check, via `authenticate`): a bad, revoked, or expired
+  signature (or an unsigned component under a require-signed policy) denies
+  outright without reaching the capability check; a valid AND currently-
+  trusted signature elevates an under-trusted component to `:verified`
+  before `aiueos.policy/verify-component` runs. `now` (epoch seconds,
+  optional) enforces the signer's expiry window; omit to check revocation
+  status only.
 
   Returns a policy-decision map (matches
   `aiueos.contract/validate-policy-decision`) with one extra key,
   `:aiueos.broker/audit-entries` — a vector of pure `aiueos.audit/audit-entry`
   maps the caller should append. Every grant and every denial is audited,
   exactly like the retired Rust broker's `verify_one`/`deny`."
-  [m graph policy]
-  (let [auth (authenticate m policy)]
-    (if (signature-violation? auth)
-      (let [decision {:aiueos/decision :deny
-                       :aiueos/component (:aiueos/component m)
-                       :aiueos/violations [auth]}]
-        (assoc decision :aiueos.broker/audit-entries (deny-audit-entries decision)))
-      (let [signer (:aiueos.broker/signer auth)
-            m-eff (elevate-for-signature m signer)
-            decision (policy/verify-component m-eff graph policy)
-            entries (if (= :grant (:aiueos/decision decision))
-                      (grant-audit-entries decision signer)
-                      (deny-audit-entries decision))]
-        (assoc decision :aiueos.broker/audit-entries entries)))))
+  ([m graph policy] (verify-one m graph policy nil))
+  ([m graph policy now]
+   (let [auth (authenticate m policy now)]
+     (if (signature-violation? auth)
+       (let [decision {:aiueos/decision :deny
+                        :aiueos/component (:aiueos/component m)
+                        :aiueos/violations [auth]}]
+         (assoc decision :aiueos.broker/audit-entries (deny-audit-entries decision)))
+       (let [signer (:aiueos.broker/signer auth)
+             m-eff (elevate-for-signature m signer)
+             decision (policy/verify-component m-eff graph policy)
+             entries (if (= :grant (:aiueos/decision decision))
+                       (grant-audit-entries decision signer)
+                       (deny-audit-entries decision))]
+         (assoc decision :aiueos.broker/audit-entries entries))))))
 
 (defn verify-system
   "Verify every component in `components` against a shared capability graph
@@ -141,19 +159,21 @@
   component, and no grants are returned. Per-component audit entries are
   always aggregated, whether the system as a whole is granted or denied
   (matching the Rust behavior that per-component denials are audited even
-  when aggregation later fails the boot)."
-  [components policy]
-  (let [g (graph/build components)
-        results (mapv #(verify-one % g policy) components)
-        audit-entries (vec (mapcat :aiueos.broker/audit-entries results))
-        violations (vec (mapcat :aiueos/violations (filter #(= :deny (:aiueos/decision %)) results)))]
-    (if (seq violations)
-      {:aiueos/decision :deny
-       :aiueos/violations violations
-       :aiueos.broker/audit-entries audit-entries}
-      {:aiueos/decision :grant
-       :aiueos/grants (mapv #(select-keys % [:aiueos/component :aiueos/capabilities]) results)
-       :aiueos.broker/audit-entries audit-entries})))
+  when aggregation later fails the boot). `now` (epoch seconds, optional)
+  is threaded to every component's `verify-one` to enforce signer expiry."
+  ([components policy] (verify-system components policy nil))
+  ([components policy now]
+   (let [g (graph/build components)
+         results (mapv #(verify-one % g policy now) components)
+         audit-entries (vec (mapcat :aiueos.broker/audit-entries results))
+         violations (vec (mapcat :aiueos/violations (filter #(= :deny (:aiueos/decision %)) results)))]
+     (if (seq violations)
+       {:aiueos/decision :deny
+        :aiueos/violations violations
+        :aiueos.broker/audit-entries audit-entries}
+       {:aiueos/decision :grant
+        :aiueos/grants (mapv #(select-keys % [:aiueos/component :aiueos/capabilities]) results)
+        :aiueos.broker/audit-entries audit-entries}))))
 
 (defn floor-trust-for-admission
   "Code-as-data admission (ADR-0004): floor `m`'s trust to `:ai-generated`
@@ -173,8 +193,9 @@
   host-adapter concern (ADR-2607022200 Layer 3), not authority. A host
   adapter should call this first and only proceed to execute (and only then
   call `run-receipt`) when `:aiueos/decision` is `:grant`."
-  [m graph policy]
-  (verify-one (floor-trust-for-admission m) graph policy))
+  ([m graph policy] (verify-admission m graph policy nil))
+  ([m graph policy now]
+   (verify-one (floor-trust-for-admission m) graph policy now)))
 
 (defn run-plan
   "Assemble a `:aiueos/run-plan` (matches `aiueos.contract/validate-run-plan`)

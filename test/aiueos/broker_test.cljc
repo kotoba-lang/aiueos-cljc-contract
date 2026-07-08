@@ -80,6 +80,70 @@
     (is (= :deny (:aiueos/decision decision)))
     (is (= [:bad-signature] (mapv :aiueos/kind (:aiueos/violations decision))))))
 
+;; ───────── signer trust store: revocation/expiry (ADR-2606290900) ─────────
+
+#?(:clj
+   (deftest verify-one-denies-a-cryptographically-valid-but-revoked-signer
+     (let [kp (gen-keypair)
+           pub-hex (raw-public-key-hex (.getPublic kp))
+           policy* (policy/parse-policy
+                    {:aiueos/signers {:root {:aiueos.signer/public-key pub-hex
+                                              :aiueos.signer/status :revoked}}})
+           unsigned-m {:aiueos/component :driver/blk :aiueos/wasm-sha256 "deadbeef"}
+           sig-hex (sign-hex (.getPrivate kp) (signing/signed-message unsigned-m))
+           m (assoc unsigned-m :aiueos/kind :driver :aiueos/signer :root :aiueos/signature sig-hex)
+           decision (broker/verify-one m empty-graph policy*)]
+       ;; the crypto signature is genuinely valid -- only the trust-store status denies it.
+       (is (= :deny (:aiueos/decision decision)))
+       (is (= [:bad-signature] (mapv :aiueos/kind (:aiueos/violations decision))))
+       (is (str/includes?
+            (:aiueos/message (first (:aiueos/violations decision)))
+            "revoked")))))
+
+#?(:clj
+   (deftest verify-one-denies-a-rotated-signer
+     (let [kp (gen-keypair)
+           pub-hex (raw-public-key-hex (.getPublic kp))
+           policy* (policy/parse-policy
+                    {:aiueos/signers {:old {:aiueos.signer/public-key pub-hex
+                                             :aiueos.signer/status :rotated
+                                             :aiueos.signer/rotated-to :new}}})
+           unsigned-m {:aiueos/component :driver/blk :aiueos/wasm-sha256 "deadbeef"}
+           sig-hex (sign-hex (.getPrivate kp) (signing/signed-message unsigned-m))
+           m (assoc unsigned-m :aiueos/kind :driver :aiueos/signer :old :aiueos/signature sig-hex)
+           decision (broker/verify-one m empty-graph policy*)]
+       (is (= :deny (:aiueos/decision decision))))))
+
+#?(:clj
+   (deftest verify-one-honors-the-signer-validity-window-when-now-is-supplied
+     (let [kp (gen-keypair)
+           pub-hex (raw-public-key-hex (.getPublic kp))
+           policy* (policy/parse-policy
+                    {:aiueos/signers {:root {:aiueos.signer/public-key pub-hex
+                                              :aiueos.signer/valid-until 1000}}})
+           unsigned-m {:aiueos/component :driver/blk :aiueos/wasm-sha256 "deadbeef"}
+           sig-hex (sign-hex (.getPrivate kp) (signing/signed-message unsigned-m))
+           m (assoc unsigned-m :aiueos/kind :driver :aiueos/signer :root :aiueos/signature sig-hex)]
+       ;; no clock supplied -> expiry not enforced, still grants
+       (is (= :grant (:aiueos/decision (broker/verify-one m empty-graph policy*))))
+       ;; before expiry -> grants
+       (is (= :grant (:aiueos/decision (broker/verify-one m empty-graph policy* 999))))
+       ;; at/after expiry -> denies, even though the signature itself is still valid
+       (is (= :deny (:aiueos/decision (broker/verify-one m empty-graph policy* 1000)))))))
+
+#?(:clj
+   (deftest verify-system-threads-now-to-every-components-signature-check
+     (let [kp (gen-keypair)
+           pub-hex (raw-public-key-hex (.getPublic kp))
+           policy* (policy/parse-policy
+                    {:aiueos/signers {:root {:aiueos.signer/public-key pub-hex
+                                              :aiueos.signer/valid-until 1000}}})
+           unsigned-m {:aiueos/component :driver/blk :aiueos/wasm-sha256 "deadbeef"}
+           sig-hex (sign-hex (.getPrivate kp) (signing/signed-message unsigned-m))
+           m (assoc unsigned-m :aiueos/kind :driver :aiueos/signer :root :aiueos/signature sig-hex)]
+       (is (= :grant (:aiueos/decision (broker/verify-system [m] policy* 999))))
+       (is (= :deny (:aiueos/decision (broker/verify-system [m] policy* 1000)))))))
+
 (deftest verify-system-grants-when-every-component-passes
   (let [fs-service {:aiueos/component :service/fs :aiueos/kind :service :aiueos/trust :verified
                     :aiueos/exports #{:fs/read} :aiueos/imports #{}}

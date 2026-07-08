@@ -99,6 +99,20 @@
     (string? id) id
     :else (str id)))
 
+(defn- signer-public-key-hex
+  "Extract the hex public key from a `:aiueos.policy/signers` registry
+  value, whether it's the legacy flat hex-string shape or a structured
+  `aiueos.policy/signer-entry` trust-store map (ADR-2606290900). This
+  namespace stays crypto-only and does not depend on `aiueos.policy` for
+  this -- both registry shapes are small enough to destructure inline
+  without a cross-namespace dependency. `nil` for an unregistered/malformed
+  entry, same as before this shape was introduced."
+  [raw]
+  (cond
+    (string? raw) raw
+    (map? raw) (:aiueos.signer/public-key raw)
+    :else nil))
+
 (defn signed-message
   "The canonical bytes a manifest signature covers: the component id, a
   newline, then `:aiueos/wasm-sha256`. Returns `nil` if `manifest` has no
@@ -248,7 +262,7 @@
          (or
           (when (nil? msg)
             (bad-signature component "signed manifest must declare :aiueos/wasm-sha256"))
-          (let [key-hex (get (:aiueos.policy/signers policy) signer)]
+          (let [key-hex (signer-public-key-hex (get (:aiueos.policy/signers policy) signer))]
             (or
              (when (nil? key-hex)
                (bad-signature component

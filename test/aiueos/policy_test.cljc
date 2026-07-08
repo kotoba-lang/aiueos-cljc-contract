@@ -119,3 +119,52 @@
         decisions (policy/verify-system [fs-service notes-app] policy/default-policy)]
     (is (= [:service/fs :app/notes] (mapv :aiueos/component decisions)))
     (is (every? #(= :grant (:aiueos/decision %)) decisions))))
+
+;; ───────── signer trust store (ADR-2606290900) ─────────
+
+(deftest signer-entry-coerces-the-legacy-flat-hex-string-shape
+  (is (= {:aiueos.signer/public-key "deadbeef" :aiueos.signer/status :active}
+         (policy/signer-entry "deadbeef"))))
+
+(deftest signer-entry-defaults-status-to-active-when-omitted-from-a-map
+  (is (= :active (:aiueos.signer/status (policy/signer-entry {:aiueos.signer/public-key "ab"})))))
+
+(deftest signer-entry-preserves-an-explicit-structured-status
+  (is (= :revoked (:aiueos.signer/status (policy/signer-entry {:aiueos.signer/public-key "ab"
+                                                                :aiueos.signer/status :revoked})))))
+
+(deftest signer-status-ok-is-false-for-revoked-and-rotated-true-for-active
+  (is (true? (policy/signer-status-ok? {:aiueos.signer/status :active})))
+  (is (false? (policy/signer-status-ok? {:aiueos.signer/status :revoked})))
+  (is (false? (policy/signer-status-ok? {:aiueos.signer/status :rotated}))))
+
+(deftest signer-in-window-with-no-now-and-no-bounds-is-always-true
+  (is (true? (policy/signer-in-window? {} nil)))
+  (is (true? (policy/signer-in-window? {:aiueos.signer/valid-from 100 :aiueos.signer/valid-until 200} nil))))
+
+(deftest signer-in-window-enforces-explicit-bounds-when-now-is-given
+  (let [entry {:aiueos.signer/valid-from 100 :aiueos.signer/valid-until 200}]
+    (is (false? (policy/signer-in-window? entry 99)))
+    (is (true? (policy/signer-in-window? entry 100)))
+    (is (true? (policy/signer-in-window? entry 199)))
+    (is (false? (policy/signer-in-window? entry 200)) "valid-until is exclusive")))
+
+(deftest signer-trusted-is-nil-for-an-unregistered-signer
+  (is (nil? (policy/signer-trusted? policy/default-policy :nobody nil))))
+
+(deftest signer-trusted-is-true-for-a-legacy-flat-string-entry
+  (let [policy* (policy/parse-policy {:aiueos/signers {:root "deadbeef"}})]
+    (is (true? (policy/signer-trusted? policy* :root nil)))))
+
+(deftest signer-trusted-is-false-for-a-revoked-signer-even-without-a-clock
+  (let [policy* (policy/parse-policy
+                 {:aiueos/signers {:root {:aiueos.signer/public-key "deadbeef"
+                                           :aiueos.signer/status :revoked}}})]
+    (is (false? (policy/signer-trusted? policy* :root nil)))))
+
+(deftest signer-trusted-is-false-outside-the-validity-window-when-now-is-given
+  (let [policy* (policy/parse-policy
+                 {:aiueos/signers {:root {:aiueos.signer/public-key "deadbeef"
+                                           :aiueos.signer/valid-until 1000}}})]
+    (is (true? (policy/signer-trusted? policy* :root 999)))
+    (is (false? (policy/signer-trusted? policy* :root 1000)))))
